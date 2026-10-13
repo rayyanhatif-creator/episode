@@ -23,12 +23,20 @@ export default function App(){
   const [hintVisible,setHintVisible]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminSession,setAdminSession]=useState(false);
   const [newTitle,setNewTitle]=useState(''),[newPrompt,setNewPrompt]=useState(''),[newAnswer,setNewAnswer]=useState('');
+  const [familyName,setFamilyName]=useState(''),[newFamilyCode,setNewFamilyCode]=useState('');
   const [showPassword,setShowPassword]=useState(false);
   const completed=useMemo(()=>stages.filter(s=>s.status==='completed').length,[stages]);
   const currentStage=activeStage||stages.find(s=>s.status==='current')||stages[0];
 
   useEffect(()=>{
     if(!isSupabaseConfigured)return;
+    supabase.auth.getSession().then(({data})=>{
+      if(data.session?.user?.app_metadata?.role==='game_admin'){setAdminSession(true);setView(v=>v==='admin-login'?'admin':v);}
+    });
+    const {data:authListener}=supabase.auth.onAuthStateChange((_event,session)=>{
+      if(session?.user?.app_metadata?.role==='game_admin')setAdminSession(true);
+      else if(!session)setAdminSession(false);
+    });
     let live=true;
     async function load(){
       const a=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,prompt,hint').order('sort_order');
@@ -41,7 +49,7 @@ export default function App(){
     const ch=supabase.channel('game-public-updates')
       .on('postgres_changes',{event:'*',schema:'public',table:'stages'},load)
       .on('postgres_changes',{event:'*',schema:'public',table:'teams'},load).subscribe();
-    return()=>{live=false;supabase.removeChannel(ch)};
+    return()=>{live=false;supabase.removeChannel(ch);authListener.subscription.unsubscribe()};
   },[]);
 
   async function joinGame(e){
@@ -76,14 +84,32 @@ export default function App(){
 
   async function adminLogin(e){
     e.preventDefault();setNotice('');
-    if(!isSupabaseConfigured){setNotice('أضف إعدادات Supabase في ملف .env.local أولًا.');return}
-    const {error}=await supabase.auth.signInWithPassword({email:adminEmail,password:adminPassword});
-    if(error){setNotice('تعذر تسجيل الدخول. تحقق من البريد وكلمة المرور.');return}
-    setAdminSession(true);setView('admin');
+    if(!isSupabaseConfigured){setNotice('أضف إعدادات Supabase أولًا ثم أنشئ حساب المشرف واضبط دوره game_admin.');return}
+    setBusy(true);
+    const {data,error}=await supabase.auth.signInWithPassword({email:adminEmail.trim(),password:adminPassword});
+    if(error){setBusy(false);setNotice('تعذر تسجيل الدخول. تحقق من البريد وكلمة المرور.');return}
+    if(data.user?.app_metadata?.role!=='game_admin'){
+      await supabase.auth.signOut();setBusy(false);setNotice('هذا الحساب غير مخوّل كمشرف. اضبط app_metadata.role إلى game_admin في Supabase.');return;
+    }
+    setBusy(false);setAdminSession(true);setView('admin');
+  }
+
+  async function createFamilyCode(e){
+    e.preventDefault();setNotice('');setNewFamilyCode('');
+    if(!isSupabaseConfigured||!adminSession){setNotice('سجّل دخول المشرف أولًا.');return}
+    if(familyName.trim().length<2){setNotice('اكتب اسم الأسرة (حرفان على الأقل).');return}
+    const bytes=crypto.getRandomValues(new Uint8Array(6));
+    const code=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code.toLowerCase()));
+    const codeHash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+    const {data:userData}=await supabase.auth.getUser();
+    const {error}=await supabase.from('family_codes').insert({family_name:familyName.trim(),code_hash:codeHash,created_by:userData.user?.id});
+    if(error){setNotice('تعذر إنشاء الرمز. تأكد من تشغيل schema.sql ومن صلاحية المشرف.');return}
+    setNewFamilyCode(code);setFamilyName('');setNotice('تم إنشاء رمز الأسرة. انسخه وأرسله للأسرة؛ لن يُعرض كاملًا مرة أخرى.');
   }
 
   async function hashAnswer(value){
-    const bytes=new TextEncoder().encode(value.normalize('NFKC').trim().toLocaleLowerCase('ar'));
+    const bytes=new TextEncoder().encode(value.trim().toLowerCase());
     const digest=await crypto.subtle.digest('SHA-256',bytes);
     return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
@@ -154,6 +180,7 @@ export default function App(){
 
     {view==='admin'&&<main className="admin-view"><div className="admin-title-row"><div><div className="eyebrow"><ShieldCheck size={15}/> إدارة المسابقة</div><h1>لوحة <span>المشرف</span></h1><p>إدارة المراحل وإعدادات رحلة الكنز.</p></div><button className="btn btn-ghost" onClick={adminLogout}>تسجيل الخروج</button></div>
       <div className="admin-metrics"><div className="panel metric"><Users/><span>الفرق الظاهرة</span><strong>{teams.length}</strong></div><div className="panel metric"><BookOpen/><span>إجمالي المراحل</span><strong>{stages.length}</strong></div><div className="panel metric"><BadgeCheck/><span>مراحل مكتملة</span><strong>{completed}</strong></div></div>
+      <section className="panel admin-stage-panel family-code-panel"><h2>إنشاء رمز دخول لأسرة</h2><p>كل رمز صالح لدخول فريق واحد فقط. يُحفظ الرمز كبصمة مشفّرة ولا يمكن عرضه مجددًا بعد مغادرة هذه الصفحة.</p><form onSubmit={createFamilyCode} className="admin-stage-form family-code-form"><label>اسم الأسرة<input value={familyName} onChange={e=>setFamilyName(e.target.value)} placeholder="مثال: أسرة أحمد" minLength={2} maxLength={80} required/></label><button className="btn btn-gold" type="submit"><KeyRound size={17}/> إنشاء رمز الأسرة</button></form>{newFamilyCode&&<div className="generated-code" role="status"><span>رمز الأسرة — انسخه وأرسله الآن</span><strong dir="ltr">{newFamilyCode}</strong><button type="button" className="btn btn-ghost" onClick={()=>navigator.clipboard?.writeText(newFamilyCode).then(()=>setNotice('تم نسخ رمز الأسرة.')).catch(()=>setNotice('انسخ الرمز يدويًا.'))}>نسخ الرمز</button></div>}</section>
       <section className="panel admin-stage-panel"><h2>إضافة مرحلة جديدة</h2><p>تُحفظ الإجابة كبصمة SHA-256 ولا تظهر في واجهة المشاركين.</p><form onSubmit={createStage} className="admin-stage-form">
         <label>عنوان المرحلة<input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="مثال: سر البوصلة" required/></label><label>نص اللغز<input value={newPrompt} onChange={e=>setNewPrompt(e.target.value)} placeholder="اكتب نص اللغز" required/></label><label>الإجابة الصحيحة<input value={newAnswer} onChange={e=>setNewAnswer(e.target.value)} placeholder="لن تظهر للمشاركين" required/></label><button className="btn btn-gold" type="submit"><Check size={17}/> حفظ المرحلة</button></form>
         <div className="admin-list">{stages.map((s,i)=><div className="admin-stage-row" key={s.id}><span>{s.number||String(i+1).padStart(2,'0')}</span><div><strong>{s.title}</strong><small>{s.description||'مرحلة في المسابقة'}</small></div><span className={'status-tag '+s.status}>{s.status==='completed'?'مكتملة':s.status==='current'?'متاحة':'مقفلة'}</span></div>)}</div></section></main>}
