@@ -18,6 +18,16 @@ create table if not exists public.teams (
  is_active boolean not null default true,
  created_at timestamptz not null default now()
 );
+create table if not exists public.family_codes (
+ id uuid primary key default gen_random_uuid(),
+ family_name text not null check(char_length(trim(family_name)) between 2 and 80),
+ code_hash text not null unique,
+ is_active boolean not null default true,
+ used_by_team uuid unique references public.teams(id) on delete set null,
+ created_by uuid references auth.users(id),
+ created_at timestamptz not null default now(),
+ used_at timestamptz
+);
 create table if not exists public.stages (
  id uuid primary key default gen_random_uuid(),
  title text not null,
@@ -56,6 +66,7 @@ create index if not exists answer_submissions_team_time_idx on public.answer_sub
 create index if not exists answer_submissions_status_idx on public.answer_submissions(status,submitted_at);
 alter table public.game_settings enable row level security;
 alter table public.teams enable row level security;
+alter table public.family_codes enable row level security;
 alter table public.stages enable row level security;
 alter table public.answer_submissions enable row level security;
 alter table public.audit_logs enable row level security;
@@ -73,6 +84,9 @@ grant select on public.public_leaderboard to anon,authenticated;
 
 create policy "admin manages game settings" on public.game_settings for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 create policy "admin manages teams" on public.teams for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
+drop policy if exists "admin manages family codes" on public.family_codes;
+create policy "admin manages family codes" on public.family_codes for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
+grant select,insert,update,delete on public.family_codes to authenticated;
 create policy "admin manages stages" on public.stages for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 create policy "admin reads submissions" on public.answer_submissions for select to authenticated using(public.is_game_admin());
 create policy "admin manages submissions" on public.answer_submissions for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
@@ -81,15 +95,19 @@ create policy "admin writes audit logs" on public.audit_logs for insert to authe
 
 create or replace function public.join_game(p_team_name text,p_session_code text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare cfg public.game_settings%rowtype; tok text; t public.teams%rowtype;
+declare cfg public.game_settings%rowtype; tok text; t public.teams%rowtype; fc public.family_codes%rowtype;
 begin
  select * into cfg from public.game_settings where id=true;
  if not found or not cfg.is_open then return jsonb_build_object('success',false,'message','المسابقة غير مفتوحة حاليًا.'); end if;
- if cfg.join_code_hash is null or encode(extensions.digest(p_session_code,'sha256'),'hex')<>cfg.join_code_hash then return jsonb_build_object('success',false,'message','رمز الدخول غير صحيح.'); end if;
+ select * into fc from public.family_codes
+ where code_hash=encode(extensions.digest(lower(trim(p_session_code)),'sha256'),'hex')
+ and is_active=true and used_by_team is null for update;
+ if not found then return jsonb_build_object('success',false,'message','رمز الأسرة غير صحيح أو سبق استخدامه. اطلب رمزًا جديدًا من المشرف.'); end if;
  if char_length(trim(p_team_name)) not between 2 and 50 then return jsonb_build_object('success',false,'message','اسم الفريق يجب أن يكون بين حرفين و50 حرفًا.'); end if;
  tok:=encode(extensions.gen_random_bytes(32),'hex');
  insert into public.teams(name,session_token_hash) values(trim(p_team_name),encode(extensions.digest(tok,'sha256'),'hex')) returning * into t;
- insert into public.audit_logs(action,entity_type,entity_id,details) values('team_joined','team',t.id::text,jsonb_build_object('team_name',t.name));
+ update public.family_codes set used_by_team=t.id,used_at=now() where id=fc.id;
+ insert into public.audit_logs(action,entity_type,entity_id,details) values('team_joined','team',t.id::text,jsonb_build_object('team_name',t.name,'family_name',fc.family_name));
  return jsonb_build_object('success',true,'team_id',t.id,'team_name',t.name,'session_token',tok);
 exception when unique_violation then return jsonb_build_object('success',false,'message','اسم الفريق مستخدم بالفعل. اختر اسمًا آخر.');
 end; $$;
@@ -120,4 +138,6 @@ grant execute on function public.join_game(text,text) to anon,authenticated;
 grant execute on function public.submit_stage_answer(text,uuid,text) to anon,authenticated;
 insert into public.game_settings(id,game_title,is_open) values(true,'شفرة الكنز',false) on conflict(id) do nothing;
 -- Enable Realtime for stages and teams in the Supabase dashboard if desired.
--- The database starts closed. Configure join_code_hash and add a first stage before opening it.
+-- The database starts closed. Create family codes in the admin panel, add a first stage, then set game_settings.is_open=true in Supabase to start the game.
+-- Set the administrator role for your chosen existing Auth user in Supabase SQL Editor:
+-- update auth.users set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"game_admin"}'::jsonb where email = 'YOUR_ADMIN_EMAIL';
