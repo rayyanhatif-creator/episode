@@ -9,21 +9,22 @@
 ## التشغيل المحلي
 1. نفّذ `npm install`.
 2. انسخ `.env.example` إلى `.env.local` وأدخل عنوان Supabase ومفتاح anon/publishable.
-3. شغّل `supabase/schema.sql` في SQL Editor لمشروع Supabase جديد.
+3. لمشروع Supabase جديد: شغّل `supabase/schema.sql` في SQL Editor. إذا كانت قاعدة البيانات القديمة موجودة مسبقًا، شغّل `supabase/migrations/20261013_family_codes.sql` بدل إعادة تشغيل المخطط كاملًا.
 4. شغّل `npm run dev`.
 5. اختبر بناء الإنتاج باستخدام `npm run build` ثم `npm run preview`.
 
 ## إعداد المسابقة
-قاعدة البيانات تبدأ والمسابقة مغلقة. اختر رمزًا خاصًا للمسابقة واحفظ بصمته، ثم افتح المسابقة:
+1. من Supabase Authentication أنشئ مستخدمًا للمشرف باستخدام البريد الإلكتروني وكلمة المرور.
+2. في SQL Editor، عيّن دور المشرف إلى `game_admin` باستبدال البريد في الاستعلام التالي ببريد المشرف:
 
 ```sql
-update public.game_settings
-set join_code_hash=encode(extensions.digest('CHANGE-THIS-JOIN-CODE','sha256'),'hex'),
-    is_open=true, updated_at=now()
-where id=true;
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"game_admin"}'::jsonb
+where email = 'YOUR_ADMIN_EMAIL';
 ```
 
-أضف أول مرحلة من SQL. استبدل نصوص المثال قبل الاستخدام:
+3. سجّل الدخول من زر «المشرف» في الموقع. من لوحة المشرف أنشئ رمزًا باسم كل أسرة، ثم انسخه وأرسله لها. الرمز مرتبط بفريق واحد، ويمكن للأسرة الدخول مجددًا باستخدام الرمز نفسه واسم الفريق نفسه.
+4. أضف أول مرحلة من SQL، واستبدل نصوص المثال قبل الاستخدام:
 
 ```sql
 insert into public.stages(title,sort_order,description,prompt,answer_hash,hint,status,points_reward)
@@ -32,7 +33,13 @@ values('البداية',1,'أول خيط في رحلة الكنز','اكتب ن�
  'تلميح اختياري','current',100);
 ```
 
-أنشئ حساب المشرف من Supabase Authentication، ثم عيّن `app_metadata.role = "game_admin"` عبر عملية إدارية موثوقة. لا تسمح للمتصفح بتعيين هذا الدور.
+5. بعد تجهيز المرحلة والرموز، افتح المسابقة:
+
+```sql
+update public.game_settings set is_open=true, updated_at=now() where id=true;
+```
+
+لا تسمح للمتصفح بتعيين دور المشرف، ولا تضع مفتاح `service_role` في الواجهة.
 
 ## الأمن
 - لا تضع مفتاح `service_role` في المتصفح أو في متغيرات `VITE_*`.
