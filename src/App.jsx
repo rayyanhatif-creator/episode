@@ -118,9 +118,10 @@ export default function App(){
     e.preventDefault();
     if(!newTitle.trim()||!newPrompt.trim()||!newAnswer.trim()){setNotice('أكمل جميع بيانات المرحلة.');return}
     if(!isSupabaseConfigured||!adminSession){setNotice('يلزم تسجيل دخول المشرف وربط Supabase لحفظ المرحلة.');return}
-    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),status:'locked',sort_order:stages.length+1,description:'مرحلة جديدة'});
+    const allCurrentStagesCompleted=stages.length>0&&stages.every(s=>s.status==='completed');
+    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:stages.length+1,description:'مرحلة جديدة'});
     if(error){setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف وترتيب المراحل.');return}
-    setNewTitle('');setNewPrompt('');setNewAnswer('');setNotice('تمت إضافة المرحلة.');
+    setNewTitle('');setNewPrompt('');setNewAnswer('');setNotice('تمت إضافة المرحلة. إذا انتهت المراحل السابقة، فستكون هذه بداية المجموعة الجديدة.');
     const {data}=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,prompt,hint').order('sort_order');
     if(data)setStages(data);
   }
