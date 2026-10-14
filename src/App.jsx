@@ -25,6 +25,7 @@ export default function App(){
   const [newTitle,setNewTitle]=useState(''),[newPrompt,setNewPrompt]=useState(''),[newAnswer,setNewAnswer]=useState('');
   const [familyName,setFamilyName]=useState(''),[newFamilyCode,setNewFamilyCode]=useState('');
   const [showPassword,setShowPassword]=useState(false);
+  const [newPassword,setNewPassword]=useState(''),[confirmPassword,setConfirmPassword]=useState('');
   const completed=useMemo(()=>stages.filter(s=>s.status==='completed').length,[stages]);
   const currentStage=(activeStage&&stages.find(s=>s.id===activeStage.id))||stages.find(s=>s.status==='current')||null;
 
@@ -44,10 +45,17 @@ export default function App(){
 
   useEffect(()=>{
     if(!isSupabaseConfigured)return;
+    const initialHash=new URLSearchParams(window.location.hash.slice(1));
+    if(initialHash.get('error_code')==='otp_expired'||initialHash.get('error')==='access_denied'){
+      setView('admin-login');
+      setNotice('رابط الاستعادة منتهي الصلاحية أو غير صالح. اطلب رابطًا جديدًا بعد تجهيز الإعدادات.');
+      window.history.replaceState(null,'',window.location.pathname+window.location.search);
+    }
     supabase.auth.getSession().then(({data})=>{
       if(data.session?.user?.app_metadata?.role==='game_admin'){setAdminSession(true);setView(v=>v==='admin-login'?'admin':v);}
     });
-    const {data:authListener}=supabase.auth.onAuthStateChange((_event,session)=>{
+    const {data:authListener}=supabase.auth.onAuthStateChange((event,session)=>{
+      if(event==='PASSWORD_RECOVERY'){setView('reset-password');setNotice('');}
       if(session?.user?.app_metadata?.role==='game_admin')setAdminSession(true);
       else if(!session)setAdminSession(false);
     });
@@ -149,6 +157,36 @@ export default function App(){
     if(data)setStages(data);
   }
 
+
+  async function requestPasswordRecovery(e){
+    e.preventDefault();setNotice('');
+    if(!isSupabaseConfigured){setNotice('خدمة تسجيل الدخول غير متصلة حاليًا.');return}
+    setBusy(true);
+    const redirectTo=window.location.origin+import.meta.env.BASE_URL;
+    const {error}=await supabase.auth.resetPasswordForEmail(adminEmail.trim(),{redirectTo});
+    setBusy(false);
+    if(error){
+      setNotice(error.message?.toLowerCase().includes('rate limit')
+        ?'تم طلب رسائل الاستعادة كثيرًا. انتظر قليلًا قبل المحاولة مرة أخرى.'
+        :'تعذر إرسال رابط الاستعادة. تحقق من البريد وإعدادات الروابط في Supabase.');
+      return;
+    }
+    setNotice('إذا كان البريد مسجلًا، فسيصلك رابط استعادة. افتحه من نفس الجهاز، ثم اختر كلمة مرور جديدة.');
+  }
+
+  async function saveNewPassword(e){
+    e.preventDefault();setNotice('');
+    if(newPassword.length<8){setNotice('اجعل كلمة المرور 8 أحرف على الأقل.');return}
+    if(newPassword!==confirmPassword){setNotice('كلمتا المرور غير متطابقتين.');return}
+    setBusy(true);
+    const {error}=await supabase.auth.updateUser({password:newPassword});
+    setBusy(false);
+    if(error){setNotice('تعذر تغيير كلمة المرور. قد يكون رابط الاستعادة انتهت صلاحيته؛ اطلب رابطًا جديدًا.');return}
+    await supabase.auth.signOut();
+    setNewPassword('');setConfirmPassword('');setAdminPassword('');
+    setView('admin-login');setNotice('تم تغيير كلمة المرور بنجاح. سجّل الدخول بكلمة المرور الجديدة.');
+  }
+
   async function adminLogout(){if(supabase)await supabase.auth.signOut();setAdminSession(false);setView('home')}
 
   return <div className="app-shell">
@@ -201,7 +239,17 @@ export default function App(){
     {view==='admin-login'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><LockKeyhole size={27}/></div><div className="eyebrow">منطقة محمية</div><h1>دخول <span>المشرف</span></h1><p>سجّل الدخول لإدارة مراحل المسابقة والفرق.</p><form onSubmit={adminLogin}>
       <label>البريد الإلكتروني<div className="input-wrap"><Users size={17}/><input type="email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="admin@example.com" required/></div></label>
       <label>كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type={showPassword?'text':'password'} value={adminPassword} onChange={e=>setAdminPassword(e.target.value)} placeholder="كلمة المرور" required/><button type="button" className="field-action" onClick={()=>setShowPassword(v=>!v)}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
-      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الدخول...':'دخول لوحة التحكم'} <ArrowLeft size={17}/></button></form><button className="back-link centered" onClick={()=>setView('home')}>العودة للموقع</button></div></main>}
+      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الدخول...':'دخول لوحة التحكم'} <ArrowLeft size={17}/></button></form><button type="button" className="back-link centered" onClick={()=>{setNotice('');setView('password-recovery')}}>نسيت كلمة المرور؟</button><button type="button" className="back-link centered" onClick={()=>setView('home')}>العودة للموقع</button></div></main>}
+
+
+    {view==='password-recovery'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><KeyRound size={27}/></div><div className="eyebrow">استعادة الحساب</div><h1>نسيت <span>كلمة المرور؟</span></h1><p>أدخل بريد المشرف لإرسال رابط استعادة جديد.</p><form onSubmit={requestPasswordRecovery}>
+      <label>البريد الإلكتروني<div className="input-wrap"><Users size={17}/><input type="email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="البريد المسجل للمشرف" required/></div></label>
+      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الإرسال...':'إرسال رابط الاستعادة'} <ArrowLeft size={17}/></button></form><button className="back-link centered" onClick={()=>{setNotice('');setView('admin-login')}}>العودة لتسجيل الدخول</button></div></main>}
+
+    {view==='reset-password'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><LockKeyhole size={27}/></div><div className="eyebrow">تأكيد الاستعادة</div><h1>تغيير <span>كلمة المرور</span></h1><p>اختر كلمة مرور جديدة لحساب المشرف.</p><form onSubmit={saveNewPassword}>
+      <label>كلمة المرور الجديدة<div className="input-wrap"><KeyRound size={17}/><input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} minLength={8} placeholder="8 أحرف على الأقل" required/></div></label>
+      <label>تأكيد كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8} placeholder="أعد كتابة كلمة المرور" required/></div></label>
+      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الحفظ...':'حفظ كلمة المرور الجديدة'} <Check size={17}/></button></form></div></main>}
 
     {view==='admin'&&<main className="admin-view"><div className="admin-title-row"><div><div className="eyebrow"><ShieldCheck size={15}/> إدارة المسابقة</div><h1>لوحة <span>المشرف</span></h1><p>إدارة المراحل وإعدادات رحلة الكنز.</p></div><button className="btn btn-ghost" onClick={adminLogout}>تسجيل الخروج</button></div>
       <div className="admin-metrics"><div className="panel metric"><Users/><span>الفرق الظاهرة</span><strong>{teams.length}</strong></div><div className="panel metric"><BookOpen/><span>إجمالي المراحل</span><strong>{stages.length}</strong></div><div className="panel metric"><BadgeCheck/><span>مراحل مكتملة</span><strong>{completed}</strong></div></div>
