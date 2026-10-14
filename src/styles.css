@@ -60,3 +60,26 @@
 @media(max-width:640px){.welcome-card{padding:29px 19px}.welcome-card>p:not(.eyebrow){font-size:12px}.game-exit-row .btn{width:100%}}
 
 .hint-request-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 20px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#d6b66e08}.hint-request-row strong{display:block;color:var(--text);font-size:13px}.hint-request-row p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.6}.hint-request-row .btn{flex-shrink:0}.hint-request-row .btn:disabled{opacity:.55;cursor:not-allowed}@media(max-width:600px){.hint-request-row{align-items:stretch;flex-direction:column}.hint-request-row .btn{width:100%;justify-content:center}}
+
+
+/* ألوان الأسر الثلاثة */
+.team-color-badge{gap:9px;border:1px solid #ffffff20}
+.team-color-dot,.family-color-tag i{display:inline-block;width:11px;height:11px;border-radius:50%;border:1px solid #ffffff65;flex-shrink:0}
+.team-color-badge.color-white{color:#fff;background:#ffffff12;border-color:#ffffff45}
+.team-color-badge.color-white .team-color-dot,.family-color-tag.color-white i{background:#fff;border-color:#cbd5e1}
+.team-color-badge.color-blue{color:#bfdbfe;background:#2563eb24;border-color:#60a5fa70}
+.team-color-badge.color-blue .team-color-dot,.family-color-tag.color-blue i{background:#3b82f6;border-color:#93c5fd}
+.team-color-badge.color-yellow{color:#fef08a;background:#eab30820;border-color:#facc1570}
+.team-color-badge.color-yellow .team-color-dot,.family-color-tag.color-yellow i{background:#facc15;border-color:#fde047}
+.family-color-tag{display:inline-flex;align-items:center;gap:7px;border:1px solid #ffffff18;border-radius:8px;padding:6px 9px;font-size:10px;white-space:nowrap}
+.family-color-tag.color-white{color:#f8fafc;background:#ffffff0a}
+.family-color-tag.color-blue{color:#bfdbfe;background:#2563eb18}
+.family-color-tag.color-yellow{color:#fef08a;background:#eab30816}
+.team-avatar.white{background:#fff;color:#172018;border:1px solid #d1d5db}
+.team-avatar.blue{background:#2563eb;color:#fff}
+.team-avatar.yellow{background:#facc15;color:#713f12}
+.puzzle-prompt{font-size:clamp(19px,2.2vw,25px);line-height:2.05;font-weight:600;color:#f5f1e6;white-space:pre-wrap}
+.family-code-form{grid-template-columns:minmax(0,1fr) minmax(180px,.8fr) auto}
+.family-code-form select{width:100%;height:45px;border:1px solid #ffffff13;border-radius:10px;background:#0c1913;color:#f1f0e9;padding:0 12px;outline:0;font:inherit;font-size:12px}
+.family-code-form select:focus{border-color:#d6b66e88}
+@media(max-width:640px){.family-code-form{grid-template-columns:1fr}.family-code-form .btn{width:100%}.puzzle-prompt{font-size:19px;line-height:2}}
