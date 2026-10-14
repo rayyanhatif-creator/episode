@@ -43,3 +43,18 @@
 .paused-indicator{display:inline-flex;align-items:center;gap:9px;margin-top:25px;padding:10px 15px;border:1px solid #333;border-radius:99px;font-size:12px;color:#b9b9b9}
 .paused-indicator i{width:7px;height:7px;border-radius:50%;background:#777}
 @media(max-width:640px){.question-editor{grid-template-columns:1fr;padding:13px}.paused-screen{min-height:calc(100vh - 150px);margin:0 -16px;padding:20px}.paused-content h1{font-size:29px}.paused-content>p:not(.paused-eyebrow){font-size:14px}}
+
+
+/* ترحيب ذو النورين وزر الخروج من المسابقة */
+.game-exit-row{display:flex;justify-content:center;margin-top:28px;padding-top:22px;border-top:1px solid var(--line)}
+.btn-exit{background:#241c19;border-color:#805348;color:#f2d4ca}
+.btn-exit:hover{background:#38241f;border-color:#bd7867}
+.paused-content .btn-exit{margin-top:30px}
+.welcome-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.82);backdrop-filter:blur(8px)}
+.welcome-card{width:min(100%,470px);padding:35px 28px;text-align:center;border:1px solid #d6b66e70;border-radius:24px;background:radial-gradient(ellipse at 50% 0%,#d6b66e18,transparent 60%),linear-gradient(145deg,#172b21,#0d1912);box-shadow:0 28px 100px #000b}
+.welcome-emblem{width:64px;height:64px;margin:0 auto 18px;display:grid;place-items:center;border:1px solid #d6b66e55;border-radius:20px;color:var(--gold2);background:#d6b66e14}
+.welcome-card .eyebrow{justify-content:center}
+.welcome-card h2{font-size:clamp(23px,5vw,30px);line-height:1.7;margin:12px 0;color:#f2e8cf}
+.welcome-card>p:not(.eyebrow){font-size:14px;line-height:2;color:#aebcaf;margin:0 0 25px}
+.welcome-card .btn{min-width:155px}
+@media(max-width:640px){.welcome-card{padding:29px 19px}.welcome-card>p:not(.eyebrow){font-size:12px}.game-exit-row .btn{width:100%}}
