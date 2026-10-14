@@ -250,7 +250,7 @@ export default function App(){
       let patch={};
       let nextValue;
       if(field==='prompt'){nextValue=(q.prompt||'').trim();if(!nextValue){setNotice('اكتب نص السؤال قبل الحفظ.');return;}patch={prompt:nextValue};}
-      else if(field==='hint'){nextValue=q.hint||'';patch={hint:nextValue};}
+      else if(field==='hint'){nextValue=q.hint||'';patch={hint:nextValue,scrambled_sentence:nextValue};}
       else if(field==='answer'){
         nextValue=(q.newAnswer||'').trim();
         if(!nextValue){setNotice('اكتب الإجابة الصحيحة قبل الحفظ.');return;}
@@ -262,21 +262,30 @@ export default function App(){
       }else if(field==='points'){nextValue=Math.max(0,Math.min(10000,Number(q.points_reward)||0));patch={points_reward:nextValue};}
       const {error:updateError}=await supabase.from('stage_questions').update(patch).eq('stage_id',editStage.id).eq('variant_no',q.variant_no);
       if(updateError){setNotice(`فشل الحفظ: ${updateError.message||'تحقق من صلاحية المشرف واتصال قاعدة البيانات.'}`);return;}
-      const {data:verify,error:verifyError}=await supabase.from('stage_questions').select('id,prompt,hint,answer_text,answer_hash,final_answer_text,final_answer_hash,points_reward').eq('stage_id',editStage.id).eq('variant_no',q.variant_no).maybeSingle();
+      const {data:verify,error:verifyError}=await supabase.from('stage_questions').select('id,prompt,hint,scrambled_sentence,answer_text,answer_hash,final_answer_text,final_answer_hash,points_reward').eq('stage_id',editStage.id).eq('variant_no',q.variant_no).maybeSingle();
       if(verifyError||!verify){setNotice(verifyError?`تعذر التأكد من الحفظ: ${verifyError.message}`:'لم يعثر النظام على نسخة السؤال بعد الحفظ.');return;}
       const verifyField={prompt:'prompt',hint:'hint',answer:'answer_text',finalAnswer:'final_answer_text',points:'points_reward'}[field];
       const storedValue=verify?.[verifyField];
-      const matches=field==='points'?Number(storedValue)===Number(nextValue):(storedValue??'')===(nextValue??'');
+      const matches=field==='points'?Number(storedValue)===Number(nextValue):(storedValue??'')===(nextValue??'')&&(field!=='hint'||(verify.scrambled_sentence??'')===(nextValue??''));
       if(!matches){setNotice('لم يتغير الحقل في قاعدة البيانات. غالبًا صلاحية التعديل مرفوضة أو لم يصل التحديث؛ جرّب تسجيل الخروج من لوحة المشرف ثم الدخول مجددًا.');return;}
       let saveMessage='تم حفظ الحقل المحدد والتأكد من تطابقه مع قاعدة البيانات.';
-      if(q.variant_no===1&&(field==='answer'||field==='finalAnswer')){
-        const legacyPatch=field==='answer'?{answer_text:nextValue,answer_hash:patch.answer_hash}:{final_answer_text:nextValue,final_answer_hash:patch.final_answer_hash};
+      if(q.variant_no===1&&['prompt','hint','answer','finalAnswer','points'].includes(field)){
+        const legacyPatch=field==='prompt'?{prompt:nextValue}:field==='hint'?{hint:nextValue,scrambled_sentence:nextValue}:field==='answer'?{answer_text:nextValue,answer_hash:patch.answer_hash}:field==='finalAnswer'?{final_answer_text:nextValue}:{points_reward:nextValue};
         const {error:legacyError}=await supabase.from('stages').update(legacyPatch).eq('id',editStage.id);
-        if(legacyError)saveMessage='تم حفظ نسخة السؤال، لكن تعذّر تحديث النسخة الاحتياطية للمرحلة.';
+        if(legacyError)saveMessage='تم حفظ الحقل في نسخة السؤال، لكن تعذّر تحديث بيانات المرحلة العامة.';
+      }
+      const {data:readiness,error:readinessError}=await supabase.from('stage_questions').select('variant_no,prompt,answer_text,final_answer_text').eq('stage_id',editStage.id).order('variant_no');
+      if(!readinessError&&readiness?.length===3){
+        const complete=readiness.every(row=>row.prompt&&row.prompt.trim()&&row.prompt!=='لم يُضف السؤال بعد'&&row.answer_text&&row.answer_text.trim()&&row.final_answer_text&&row.final_answer_text.trim());
+        if(complete){
+          const {data:currentRows}=await supabase.from('stages').select('id').eq('status','current').neq('id',editStage.id).limit(1);
+          if(!currentRows?.length)await supabase.from('stages').update({status:'current',description:(editStage.description||'').replace('مسودة مرحلة — أكمل الحقول قبل بدء اللعب','')||'مرحلة مكتملة'}).eq('id',editStage.id);
+        }
       }
       setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j!==index?item:({...item,
         prompt:verify.prompt,
         hint:verify.hint,
+        scrambled_sentence:verify.scrambled_sentence,
         answer_text:verify.answer_text,
         answer_hash:verify.answer_hash,
         final_answer_text:verify.final_answer_text,
@@ -296,39 +305,37 @@ export default function App(){
 
   async function createStage(e){
     e.preventDefault();
-    if(!newTitle.trim()||newQuestions.some(q=>!q.prompt.trim()||!q.answer.trim()||!q.hint.trim()||!q.finalAnswer.trim())){
-      setNotice('أكمل بيانات الأسئلة الثلاثة، مع الإجابة والتلميح ومكان الورقة والحل النهائي لكل سؤال.');return;
-    }
+    if(!newTitle.trim()){setNotice('اكتب عنوان المرحلة أولًا.');return;}
     if(!isSupabaseConfigured||!adminSession){setNotice('يلزم تسجيل دخول المشرف وربط Supabase لحفظ المرحلة.');return}
-    setBusy(true);
-    const allCurrentStagesCompleted=adminStages.length>0&&adminStages.every(s=>s.status==='completed');
-    const sortOrder=Math.max(0,...adminStages.map(s=>Number(s.sort_order)||0))+1;
-    const first=newQuestions[0];
-    const {data:stage,error}=await supabase.from('stages').insert({
-      title:newTitle.trim(),prompt:first.prompt.trim(),answer_hash:await hashAnswer(first.answer),answer_text:first.answer.trim(),final_answer_text:first.finalAnswer.trim(),
-      hint:first.hint.trim(),
-      status:adminStages.length===0||allCurrentStagesCompleted?'current':'locked',
-      sort_order:sortOrder,points_reward:Math.max(0,Math.min(10000,Number(first.points)||100)),
-      description:newDescription.trim()||'مرحلة جديدة'
-    }).select('id').single();
-    if(error||!stage){setBusy(false);setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف واتصال قاعدة البيانات.');return}
-    const variants=await Promise.all(newQuestions.map(async(q,index)=>({
-      stage_id:stage.id,variant_no:index+1,prompt:q.prompt.trim(),answer_hash:await hashAnswer(q.answer),answer_text:q.answer.trim(),
-      hint:q.hint.trim(),final_answer_hash:await hashAnswer(q.finalAnswer),final_answer_text:q.finalAnswer.trim(),
-      points_reward:Math.max(0,Math.min(10000,Number(q.points)||100))
-    })));
-    const {error:questionError}=await supabase.from('stage_questions').insert(variants);
-    if(questionError){
-      await supabase.from('stages').delete().eq('id',stage.id);
-      setBusy(false);setNotice('تعذر حفظ الأسئلة الثلاثة. لم يتم الاحتفاظ بالمرحلة غير المكتملة.');return;
-    }
-    setNewTitle('');setNewDescription('');setNewQuestions([blankQuestion(),blankQuestion(),blankQuestion()]);
-    setBusy(false);setNotice('تم حفظ المرحلة بالأسئلة الثلاثة وتوزيع نسخها على الأسر.');
-    await refreshAdminData();
-    const {data}=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,points_reward').order('sort_order');
-    if(data)setStages(data);
+    setBusy(true);setNotice('');
+    try{
+      const sortOrder=Math.max(0,...adminStages.map(s=>Number(s.sort_order)||0))+1;
+      const placeholder='__DRAFT_NOT_READY__';
+      const placeholderHash=await hashAnswer(placeholder);
+      const {data:stage,error}=await supabase.from('stages').insert({
+        title:newTitle.trim(),prompt:'لم يُضف السؤال بعد',answer_hash:placeholderHash,answer_text:null,final_answer_text:null,
+        hint:'',scrambled_sentence:'',status:'locked',sort_order:sortOrder,points_reward:100,
+        description:newDescription.trim()||'مسودة مرحلة — أكمل الحقول قبل بدء اللعب'
+      }).select('id').single();
+      if(error||!stage){setNotice(`لم يتم إنشاء المسودة: ${error?.message||'تحقق من صلاحيات المشرف واتصال قاعدة البيانات.'}`);return;}
+      const variants=[1,2,3].map(variant_no=>({
+        stage_id:stage.id,variant_no,prompt:'لم يُضف السؤال بعد',answer_hash:placeholderHash,answer_text:null,
+        hint:'',scrambled_sentence:'',final_answer_hash:placeholderHash,final_answer_text:null,points_reward:100
+      }));
+      const {error:questionError}=await supabase.from('stage_questions').insert(variants);
+      if(questionError){
+        await supabase.from('stages').delete().eq('id',stage.id);
+        setNotice(`تعذر إنشاء حقول المسودة: ${questionError.message||'حاول مرة أخرى.'}`);return;
+      }
+      setNewTitle('');setNewDescription('');setNewQuestions([blankQuestion(),blankQuestion(),blankQuestion()]);
+      setNotice('تم إنشاء مسودة المرحلة. افتح «تعديل» واحفظ كل حقل لحاله؛ المرحلة مقفلة عن الأسر حتى تكتمل الأسئلة الثلاثة.');
+      await refreshAdminData();
+      const {data:created}=await supabase.from('stages').select('id,title,number,description,prompt,hint,scrambled_sentence,answer_hash,answer_text,final_answer_text,status,sort_order,points_reward').eq('id',stage.id).single();
+      const {data:questions}=await supabase.from('stage_questions').select('id,stage_id,variant_no,prompt,answer_hash,answer_text,hint,scrambled_sentence,final_answer_hash,final_answer_text,points_reward').eq('stage_id',stage.id).order('variant_no');
+      if(created)setEditStage({...created,newAnswer:created.answer_text||'',newFinalAnswer:created.final_answer_text||'',questions:(questions||[]).map(q=>({...q,newAnswer:q.answer_text||'',newFinalAnswer:q.final_answer_text||''}))});
+    }catch(err){setNotice(`حدث خطأ أثناء إنشاء المسودة: ${err?.message||'حاول مرة أخرى.'}`);}
+    finally{setBusy(false);}
   }
-
 
   async function requestPasswordRecovery(e){
     e.preventDefault();setNotice('');
@@ -431,10 +438,9 @@ export default function App(){
       <section className="panel admin-stage-panel control-panel"><h2>حالة المسابقة</h2><p>أوقف اللعب مؤقتًا أو أعد تشغيله؛ ستظل الأسر قادرة على الدخول إلى حساباتها.</p><div className="admin-control-row"><span className={'status-tag '+(gameSettings.is_open?'current':'')}>{gameSettings.is_open?'المسابقة مفتوحة':'المسابقة مغلقة'}</span><button className="btn btn-gold" onClick={async()=>{const next=!gameSettings.is_open;const {error}=await supabase.from('game_settings').update({is_open:next}).eq('id',true);if(error){setNotice('تعذر تغيير حالة المسابقة. تحقق من صلاحيات المشرف.');return;}setGameSettings(v=>({...v,is_open:next}));setGameOpen(next);setNotice(next?'تم فتح المسابقة.':'تم إيقاف المسابقة؛ يمكن للأسر الدخول وستظهر لهم شاشة التوقف.');}}>{gameSettings.is_open?'إغلاق المسابقة':'فتح المسابقة'}</button></div></section>
       <div className="admin-metrics"><div className="panel metric"><Users/><span>الفرق الظاهرة</span><strong>{teams.length}</strong></div><div className="panel metric"><BookOpen/><span>إجمالي المراحل</span><strong>{stages.length}</strong></div><div className="panel metric"><BadgeCheck/><span>مراحل مكتملة</span><strong>{completed}</strong></div></div>
       <section className="panel admin-stage-panel family-code-panel"><h2>إنشاء رمز دخول لأسرة</h2><p>رمز خاص بالأسرة، ويرتبط بأول جوال يدخل به. يُمنع أي جوال آخر من استخدام الرمز، حتى لو كان صحيحًا. يُحفظ الرمز كبصمة مشفّرة ولا يمكن عرضه مجددًا بعد إغلاق نافذة الإنشاء.</p><form onSubmit={createFamilyCode} className="admin-stage-form family-code-form"><label>اسم الأسرة<input value={familyName} onChange={e=>setFamilyName(e.target.value)} placeholder="مثال: أسرة أحمد" minLength={2} maxLength={80} required/></label><label>لون الأسرة<select value={familyColor} onChange={e=>setFamilyColor(e.target.value)}><option value="white">الأبيض — السؤال الأول</option><option value="blue">الأزرق — السؤال الثاني</option><option value="yellow">الأصفر — السؤال الثالث</option></select></label><button className="btn btn-gold" type="submit"><KeyRound size={17}/> إنشاء رمز الأسرة</button></form>{newFamilyCode&&<div className="generated-code" role="status"><span>رمز الأسرة — اللون {familyColorLabels[familyColor]} — انسخه وأرسله الآن</span><strong dir="ltr">{newFamilyCode}</strong><button type="button" className="btn btn-ghost" onClick={()=>navigator.clipboard?.writeText(newFamilyCode).then(()=>setNotice('تم نسخ رمز الأسرة.')).catch(()=>setNotice('انسخ الرمز يدويًا.'))}>نسخ الرمز</button></div>}</section>
-      <section className="panel admin-stage-panel"><h2>إضافة مرحلة جديدة</h2><p>أدخل ثلاثة أسئلة مختلفة. كل سؤال له إجابة تفتح التلميح، ثم كلمات الورقة والحل النهائي والنقاط.</p><form onSubmit={createStage} className="admin-stage-form admin-stage-form-expanded">
-        <label>عنوان المرحلة<input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="مثال: سر البوصلة" required/></label><label>وصف مختصر<input value={newDescription} onChange={e=>setNewDescription(e.target.value)} placeholder="وصف المرحلة"/></label>
-        {newQuestions.map((q,i)=><div className="question-editor" key={i}><h3>نسخة السؤال {i+1}</h3><label>نص السؤال<textarea value={q.prompt} onChange={e=>updateNewQuestion(i,'prompt',e.target.value)} required placeholder="السؤال الذي ستراه الأسرة"/></label><label>إجابة السؤال<input value={q.answer} onChange={e=>updateNewQuestion(i,'answer',e.target.value)} required placeholder="الإجابة التي تفتح التلميح"/></label><label>التلميح<textarea value={q.hint} onChange={e=>updateNewQuestion(i,'hint',e.target.value)} required placeholder="مكان الورقة أو الدليل"/></label><label>الحل النهائي الصحيح<input value={q.finalAnswer} onChange={e=>updateNewQuestion(i,'finalAnswer',e.target.value)} required placeholder="الحل الذي يجب أن تكتبه الأسرة"/></label><label>نقاط هذه النسخة<input type="number" min="0" max="10000" value={q.points} onChange={e=>updateNewQuestion(i,'points',e.target.value)} required/></label></div>)}
-        <button className="btn btn-gold" type="submit" disabled={busy}>{busy?<RefreshCw className="spin" size={17}/>:<Check size={17}/>} حفظ المرحلة بالأسئلة الثلاثة</button></form>
+      <section className="panel admin-stage-panel"><h2>إضافة مرحلة جديدة</h2><p>أنشئ المرحلة بعنوانها فقط، وبعدها احفظ التلميح أو السؤال أو الإجابة أو الحل النهائي كل واحد لحاله. تقدر تطلع وترجع أنت أو شخص ثاني بنفس حساب المشرف، وبتلقى كل شيء محفوظ. تبقى المرحلة مقفلة عن الأسر حتى تكتمل بيانات الأسئلة الثلاثة.</p><form onSubmit={createStage} className="admin-stage-form">
+        <label>عنوان المرحلة<input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="مثال: سر البوصلة" required/></label><label>وصف مختصر<input value={newDescription} onChange={e=>setNewDescription(e.target.value)} placeholder="وصف مختصر (اختياري)"/></label>
+        <button className="btn btn-gold" type="submit" disabled={busy}>{busy?<RefreshCw className="spin" size={17}/>:<Check size={17}/>} إنشاء مسودة المرحلة</button></form>
         <div className="admin-list">{adminStages.map((s,i)=><div className="admin-stage-row" key={s.id}><span>{s.number||String(i+1).padStart(2,'0')}</span><div><strong>{s.title}</strong><small>{s.description||'مرحلة في المسابقة'}</small></div><span className="status-tag">تقدّم تلقائي</span><button className="btn btn-ghost btn-small" onClick={()=>setEditStage({...s,newAnswer:s.answer_text||'',newFinalAnswer:s.final_answer_text||'',questions:(s.questions||[]).map(q=>({...q,newAnswer:q.answer_text||'',newFinalAnswer:q.final_answer_text||''}))})}>تعديل</button><button className="btn btn-ghost btn-small danger" onClick={async()=>{if(!window.confirm('هل تريد حذف هذه المرحلة نهائيًا؟ سيتم حذف إجاباتها المسجلة أيضًا.'))return;const {error}=await supabase.from('stages').delete().eq('id',s.id);if(error){setNotice('تعذر حذف المرحلة.');return;}setNotice('تم حذف المرحلة وإجاباتها المرتبطة.');await refreshAdminData();}}>حذف</button></div>)}</div></section>
       <section className="panel admin-stage-panel"><h2>إدارة الأسر والفرق</h2><p>استبعاد الأسرة يعطّل رمزها وجلسة فريقها ويزيل الفريق من لوحة الترتيب، مع الاحتفاظ بسجله للمراجعة.</p><div className="admin-list">{familyCodes.map(fc=>{const t=adminTeams.find(x=>x.id===fc.used_by_team);return <div className="admin-stage-row family-row" key={fc.id}><div><strong>{fc.family_name}</strong><small>{t?`الفريق: ${t.name} • ${t.points||0} نقطة`:'لم تدخل الأسرة بعد'}</small></div><span className={`family-color-tag color-${fc.color||'white'}`}><i/> اللون {familyColorLabels[fc.color]||'الأبيض'}</span><span className={'status-tag '+(fc.is_active?'current':'')}>{!fc.is_active?'مستبعدة':t&&!t.is_active?'الفريق معطّل':t?'مشاركة':'رمز فعّال'}</span>{fc.is_active&&<button className="btn btn-ghost btn-small danger" onClick={async()=>{if(!window.confirm(`استبعاد ${fc.family_name} من المسابقة؟`))return;const {error:codeError}=await supabase.from('family_codes').update({is_active:false}).eq('id',fc.id);if(codeError){setNotice('تعذر تعطيل رمز الأسرة.');return;}if(fc.used_by_team){const {error:teamError}=await supabase.from('teams').update({is_active:false}).eq('id',fc.used_by_team);if(teamError){setNotice('تعطّل رمز الأسرة، لكن تعذّر تعطيل الفريق. حدّث الصفحة وحاول مرة أخرى.');await refreshAdminData();return;}}setNotice('تم استبعاد الأسرة وتعطيل جلستها.');await refreshAdminData();}}>استبعاد الأسرة</button>}</div>})}{!familyCodes.length&&<p className="empty-state">لا توجد أسر حتى الآن. أنشئ رمزًا لكل أسرة من القسم أعلاه.</p>}</div></section>
       {editStage&&<div className="edit-overlay"><section className="panel edit-stage-card"><div className="section-title-row"><h2>تعديل المرحلة والأسئلة</h2><button className="btn btn-ghost btn-small" onClick={()=>setEditStage(null)}>إغلاق</button></div><form className="admin-stage-form admin-stage-form-expanded" onSubmit={async e=>{e.preventDefault();const {error:stageError}=await supabase.from('stages').update({title:editStage.title.trim(),description:editStage.description||'',answer_text:editStage.questions?.[0]?.newAnswer?.trim()||editStage.answer_text||null,final_answer_text:editStage.questions?.[0]?.newFinalAnswer?.trim()||editStage.final_answer_text||null}).eq('id',editStage.id);if(stageError){setNotice('تعذر حفظ تعديلات المرحلة.');return;}for(const q of editStage.questions||[]){const patch={stage_id:editStage.id,variant_no:q.variant_no,prompt:q.prompt.trim(),answer_hash:q.newAnswer?.trim()?await hashAnswer(q.newAnswer):q.answer_hash,answer_text:q.newAnswer?.trim()||q.answer_text||null,hint:q.hint?.trim()||'',final_answer_hash:q.newFinalAnswer?.trim()?await hashAnswer(q.newFinalAnswer):q.final_answer_hash,final_answer_text:q.newFinalAnswer?.trim()||q.final_answer_text||null,points_reward:Math.max(0,Math.min(10000,Number(q.points_reward)||0))};const {error}=await supabase.from('stage_questions').upsert(q.id?{...patch,id:q.id}:patch,{onConflict:'stage_id,variant_no'});if(error){setNotice('حُفظ جزء من التعديلات، لكن تعذر حفظ أحد الأسئلة.');await refreshAdminData();return;}}setNotice('تم حفظ تعديلات المرحلة والأسئلة.');setEditStage(null);await refreshAdminData();}}><label>عنوان المرحلة<input value={editStage.title} onChange={e=>setEditStage(v=>({...v,title:e.target.value}))} required/></label><label>وصف مختصر<input value={editStage.description||''} onChange={e=>setEditStage(v=>({...v,description:e.target.value}))}/></label>{(editStage.questions||[]).map((q,i)=><div className="question-editor" key={q.id||i}><h3>نسخة السؤال {q.variant_no}</h3><label>نص السؤال<textarea value={q.prompt} onChange={e=>setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j===i?({...item,prompt:e.target.value}):item)}))} required/><button type="button" className="btn btn-ghost btn-small" disabled={savingField===q.id+':prompt'} onClick={e=>{e.preventDefault();e.stopPropagation();saveQuestionField(i,'prompt')}}>{savingField===q.id+':prompt'?'جارٍ الحفظ...':'حفظ نص السؤال فقط'}</button></label><label>الإجابة الصحيحة (ظاهرة للمشرف فقط)<input value={q.newAnswer||''} onChange={e=>setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j===i?({...item,newAnswer:e.target.value}):item)}))} placeholder="الإجابة الصحيحة لهذا السؤال"/><button type="button" className="btn btn-ghost btn-small" disabled={savingField===q.id+':answer'} onClick={e=>{e.preventDefault();e.stopPropagation();saveQuestionField(i,'answer')}}>{savingField===q.id+':answer'?'جارٍ الحفظ...':'حفظ الإجابة فقط'}</button></label><label>التلميح<textarea value={q.hint||''} onChange={e=>setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j===i?({...item,hint:e.target.value}):item)}))}/><button type="button" className="btn btn-ghost btn-small" disabled={savingField===q.id+':hint'} onClick={e=>{e.preventDefault();e.stopPropagation();saveQuestionField(i,'hint')}}>{savingField===q.id+':hint'?'جارٍ الحفظ...':'حفظ التلميح فقط'}</button></label><label>الحل النهائي الصحيح (ظاهر للمشرف فقط)<input value={q.newFinalAnswer||''} onChange={e=>setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j===i?({...item,newFinalAnswer:e.target.value}):item)}))} placeholder="الحل الذي يجب أن تكتبه الأسرة"/><button type="button" className="btn btn-ghost btn-small" disabled={savingField===q.id+':finalAnswer'} onClick={e=>{e.preventDefault();e.stopPropagation();saveQuestionField(i,'finalAnswer')}}>{savingField===q.id+':finalAnswer'?'جارٍ الحفظ...':'حفظ الحل النهائي فقط'}</button></label><label>النقاط<input type="number" min="0" max="10000" value={q.points_reward} onChange={e=>setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j===i?({...item,points_reward:e.target.value}):item)}))}/><button type="button" className="btn btn-ghost btn-small" disabled={savingField===q.id+':points'} onClick={e=>{e.preventDefault();e.stopPropagation();saveQuestionField(i,'points')}}>{savingField===q.id+':points'?'جارٍ الحفظ...':'حفظ النقاط فقط'}</button></label></div>)}<button className="btn btn-gold" type="submit"><Check size={17}/> حفظ التعديلات</button></form></section></div>}</main>}
