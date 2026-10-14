@@ -293,7 +293,7 @@ export default function App(){
         final_answer_hash:verify.final_answer_hash,
         points_reward:verify.points_reward,
         ...(field==='answer'?{newAnswer:verify.answer_text||''}:{}),
-        ...(field==='finalAnswer'?{newFinalAnswer:verify.final_answer_text||'':{})
+        ...(field==='finalAnswer'?{newFinalAnswer:verify.final_answer_text||''}:{})
       }))}));
       setNotice(saveMessage);
       await refreshAdminData();
