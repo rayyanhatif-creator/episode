@@ -26,6 +26,7 @@ export default function App(){
   const [familyName,setFamilyName]=useState(''),[newFamilyCode,setNewFamilyCode]=useState('');
   const [showPassword,setShowPassword]=useState(false);
   const [newPassword,setNewPassword]=useState(''),[confirmPassword,setConfirmPassword]=useState('');
+  const [registerPassword,setRegisterPassword]=useState(''),[registerConfirmPassword,setRegisterConfirmPassword]=useState('');
   const completed=useMemo(()=>stages.filter(s=>s.status==='completed').length,[stages]);
   const currentStage=(activeStage&&stages.find(s=>s.id===activeStage.id))||stages.find(s=>s.status==='current')||null;
 
@@ -123,6 +124,32 @@ export default function App(){
       await supabase.auth.signOut();setBusy(false);setNotice('هذا الحساب غير مخوّل كمشرف. اضبط app_metadata.role إلى game_admin في Supabase.');return;
     }
     setBusy(false);setAdminSession(true);setView('admin');
+  }
+
+  async function registerAdminAccount(e){
+    e.preventDefault();setNotice('');
+    if(!isSupabaseConfigured){setNotice('خدمة إنشاء الحساب غير متصلة حاليًا.');return}
+    if(registerPassword.length<8){setNotice('اجعل كلمة المرور 8 أحرف على الأقل.');return}
+    if(registerPassword!==registerConfirmPassword){setNotice('كلمتا المرور غير متطابقتين.');return}
+    setBusy(true);
+    const redirectTo=window.location.origin+import.meta.env.BASE_URL;
+    const {data,error}=await supabase.auth.signUp({
+      email:adminEmail.trim(),
+      password:registerPassword,
+      options:{emailRedirectTo:redirectTo}
+    });
+    setBusy(false);
+    if(error){
+      setNotice(error.message?.toLowerCase().includes('rate limit')
+        ?'تم طلب رسائل كثيرة. انتظر قليلًا قبل المحاولة مرة أخرى.'
+        :'تعذر إنشاء الحساب. تأكد من البريد أو جرّب بريدًا غير مسجل من قبل.');
+      return;
+    }
+    setRegisterPassword('');setRegisterConfirmPassword('');
+    setView('admin-login');
+    setNotice(data.session
+      ?'تم إنشاء الحساب. هذا الحساب لا يملك صلاحية المشرف بعد؛ بعد ذلك نفعّله بأمان ثم نحذف خيار التسجيل.'
+      :'تم إنشاء طلب الحساب. افتح رسالة التأكيد في بريدك أولًا، وبعدها نفعّل صلاحية المشرف ونحذف خيار التسجيل.');
   }
 
   async function createFamilyCode(e){
@@ -239,7 +266,15 @@ export default function App(){
     {view==='admin-login'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><LockKeyhole size={27}/></div><div className="eyebrow">منطقة محمية</div><h1>دخول <span>المشرف</span></h1><p>سجّل الدخول لإدارة مراحل المسابقة والفرق.</p><form onSubmit={adminLogin}>
       <label>البريد الإلكتروني<div className="input-wrap"><Users size={17}/><input type="email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="admin@example.com" required/></div></label>
       <label>كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type={showPassword?'text':'password'} value={adminPassword} onChange={e=>setAdminPassword(e.target.value)} placeholder="كلمة المرور" required/><button type="button" className="field-action" onClick={()=>setShowPassword(v=>!v)}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
-      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الدخول...':'دخول لوحة التحكم'} <ArrowLeft size={17}/></button></form><button type="button" className="back-link centered" onClick={()=>{setNotice('');setView('password-recovery')}}>نسيت كلمة المرور؟</button><button type="button" className="back-link centered" onClick={()=>setView('home')}>العودة للموقع</button></div></main>}
+      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الدخول...':'دخول لوحة التحكم'} <ArrowLeft size={17}/></button></form><button type="button" className="back-link centered" onClick={()=>{setNotice('');setView('password-recovery')}}>نسيت كلمة المرور؟</button><button type="button" className="back-link centered" onClick={()=>{setNotice('');setRegisterPassword('');setRegisterConfirmPassword('');setView('admin-register')}}>تسجيل جديد</button><button type="button" className="back-link centered" onClick={()=>setView('home')}>العودة للموقع</button></div></main>}
+
+    {view==='admin-register'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><Users size={27}/></div><div className="eyebrow">إنشاء حساب مؤقت</div><h1>تسجيل <span>حساب جديد</span></h1><p>أنشئ حسابًا بالبريد وكلمة المرور. التسجيل وحده لا يمنح صلاحية المشرف؛ سنفعّلها بأمان ثم نزيل هذا الخيار.</p><form onSubmit={registerAdminAccount}>
+      <label>البريد الإلكتروني<div className="input-wrap"><Users size={17}/><input type="email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="أدخل بريدك الإلكتروني" autoComplete="email" required/></div></label>
+      <label>كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type="password" value={registerPassword} onChange={e=>setRegisterPassword(e.target.value)} placeholder="8 أحرف على الأقل" autoComplete="new-password" minLength={8} required/></div></label>
+      <label>تأكيد كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type="password" value={registerConfirmPassword} onChange={e=>setRegisterConfirmPassword(e.target.value)} placeholder="أعد كتابة كلمة المرور" autoComplete="new-password" minLength={8} required/></div></label>
+      <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ إنشاء الحساب...':'إنشاء الحساب'} <ArrowLeft size={17}/></button></form><button type="button" className="back-link centered" onClick={()=>{setNotice('');setView('admin-login')}}>العودة لتسجيل الدخول</button></div></main>}
+
+    {view==='password-recovery'&&<main className="admin-login-view">
 
 
     {view==='password-recovery'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><KeyRound size={27}/></div><div className="eyebrow">استعادة الحساب</div><h1>نسيت <span>كلمة المرور؟</span></h1><p>أدخل بريد المشرف لإرسال رابط استعادة جديد.</p><form onSubmit={requestPasswordRecovery}>
