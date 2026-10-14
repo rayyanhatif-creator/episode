@@ -199,14 +199,40 @@ export default function App(){
     return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
 
+  function updateNewQuestion(index,key,value){
+    setNewQuestions(current=>current.map((q,i)=>i===index?({...q,[key]:value}):q));
+  }
+
   async function createStage(e){
     e.preventDefault();
-    if(!newTitle.trim()||!newPrompt.trim()||!newAnswer.trim()){setNotice('أكمل جميع بيانات المرحلة.');return}
+    if(!newTitle.trim()||newQuestions.some(q=>!q.prompt.trim()||!q.answer.trim()||!q.hint.trim()||!q.scrambled.trim()||!q.finalAnswer.trim())){
+      setNotice('أكمل بيانات الأسئلة الثلاثة، مع الإجابة والتلميح والكلمات المبعثرة والحل النهائي لكل سؤال.');return;
+    }
     if(!isSupabaseConfigured||!adminSession){setNotice('يلزم تسجيل دخول المشرف وربط Supabase لحفظ المرحلة.');return}
-    const allCurrentStagesCompleted=stages.length>0&&stages.every(s=>s.status==='completed');
-    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),hint:newHint.trim()||null,scrambled_sentence:newScrambled.trim()||null,status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:Math.max(0,...adminStages.map(s=>Number(s.sort_order)||0))+1,points_reward:Math.max(0,Math.min(10000,Number(newPoints)||100)),description:newDescription.trim()||'مرحلة جديدة'});
-    if(error){setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف وترتيب المراحل.');return}
-    setNewTitle('');setNewPrompt('');setNewAnswer('');setNewHint('');setNewScrambled('');setNewDescription('');setNewPoints('100');setNotice('تمت إضافة المرحلة بنجاح.');
+    setBusy(true);
+    const allCurrentStagesCompleted=adminStages.length>0&&adminStages.every(s=>s.status==='completed');
+    const sortOrder=Math.max(0,...adminStages.map(s=>Number(s.sort_order)||0))+1;
+    const first=newQuestions[0];
+    const {data:stage,error}=await supabase.from('stages').insert({
+      title:newTitle.trim(),prompt:first.prompt.trim(),answer_hash:await hashAnswer(first.answer),
+      hint:first.hint.trim(),scrambled_sentence:first.scrambled.trim(),
+      status:adminStages.length===0||allCurrentStagesCompleted?'current':'locked',
+      sort_order:sortOrder,points_reward:Math.max(0,Math.min(10000,Number(first.points)||100)),
+      description:newDescription.trim()||'مرحلة جديدة'
+    }).select('id').single();
+    if(error||!stage){setBusy(false);setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف واتصال قاعدة البيانات.');return}
+    const variants=await Promise.all(newQuestions.map(async(q,index)=>({
+      stage_id:stage.id,variant_no:index+1,prompt:q.prompt.trim(),answer_hash:await hashAnswer(q.answer),
+      hint:q.hint.trim(),scrambled_sentence:q.scrambled.trim(),final_answer_hash:await hashAnswer(q.finalAnswer),
+      points_reward:Math.max(0,Math.min(10000,Number(q.points)||100))
+    })));
+    const {error:questionError}=await supabase.from('stage_questions').insert(variants);
+    if(questionError){
+      await supabase.from('stages').delete().eq('id',stage.id);
+      setBusy(false);setNotice('تعذر حفظ الأسئلة الثلاثة. لم يتم الاحتفاظ بالمرحلة غير المكتملة.');return;
+    }
+    setNewTitle('');setNewDescription('');setNewQuestions([blankQuestion(),blankQuestion(),blankQuestion()]);
+    setBusy(false);setNotice('تم حفظ المرحلة بالأسئلة الثلاثة وتوزيع نسخها على الأسر.');
     await refreshAdminData();
     const {data}=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,points_reward').order('sort_order');
     if(data)setStages(data);
