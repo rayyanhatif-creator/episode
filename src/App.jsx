@@ -17,7 +17,7 @@ const demoTeams = [
 function Brand(){return <div className="brand"><div className="brand-mark"><KeyRound size={22}/></div><div><strong>شفرة الكنز</strong><span>رحلة تبدأ بلغز</span></div></div>}
 
 export default function App(){
-  const [view,setView]=useState('home'),[teamName,setTeamName]=useState(''),[sessionCode,setSessionCode]=useState('');
+  const [view,setView]=useState('home'),[teamName,setTeamName]=useState(''),[sessionCode,setSessionCode]=useState(''),[mobileNavOpen,setMobileNavOpen]=useState(false);
   const [team,setTeam]=useState(null),[stages,setStages]=useState([]),[teams,setTeams]=useState([]),[gameOpen,setGameOpen]=useState(null);
   const [activeStage,setActiveStage]=useState(null),[answer,setAnswer]=useState(''),[feedback,setFeedback]=useState('');
   const [hintVisible,setHintVisible]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
@@ -156,8 +156,9 @@ export default function App(){
       <button className={view==='home'?'nav-link active':'nav-link'} onClick={()=>setView('home')}>الرئيسية</button>
       <button className={view==='leaderboard'?'nav-link active':'nav-link'} onClick={()=>setView('leaderboard')}>لوحة الترتيب</button>
       <button className="nav-link" onClick={()=>{setView('admin-login');setNotice('')}}>المشرف <LockKeyhole size={14}/></button>
-    </nav><button className="mobile-menu" aria-label="القائمة" onClick={()=>setView(view==='admin-login'?'home':'admin-login')}><Menu/></button>
+    </nav><button className="mobile-menu" aria-label="القائمة" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(v=>!v)}><Menu/></button>
     <div className="live-pill"><span className="live-dot"/>{!isSupabaseConfigured?'وضع المعاينة':gameOpen===null?'جارٍ التحقق':gameOpen?'المسابقة مفتوحة':'المسابقة مغلقة'}</div></header>
+    {mobileNavOpen&&<nav className="mobile-nav-panel" aria-label="القائمة الرئيسية"><button className={view==='home'?'nav-link active':'nav-link'} onClick={()=>{setView('home');setMobileNavOpen(false)}}>الرئيسية</button><button className={view==='leaderboard'?'nav-link active':'nav-link'} onClick={()=>{setView('leaderboard');setMobileNavOpen(false)}}>لوحة الترتيب</button><button className="nav-link" onClick={()=>{setView('admin-login');setMobileNavOpen(false);setNotice('')}}>المشرف <LockKeyhole size={14}/></button></nav>}
     {notice&&<div className="notice" role="status"><span>{notice}</span><button onClick={()=>setNotice('')} aria-label="إغلاق"><X size={16}/></button></div>}
 
     {view==='home'&&<main>
