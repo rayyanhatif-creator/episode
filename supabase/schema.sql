@@ -76,7 +76,7 @@ create or replace function public.is_game_admin()
 returns boolean language sql stable security definer set search_path = '' as $
  select coalesce((auth.jwt()->'app_metadata'->>'role')='game_admin',false);
 $;
-revoke all on function public.is_game_admin() from public;
+revoke all on function public.is_game_admin() from public,anon;
 grant execute on function public.is_game_admin() to authenticated;
 drop view if exists public.public_stages;
 create view public.public_stages with (security_invoker = true) as
@@ -104,6 +104,10 @@ revoke all on function public.get_game_status() from public;
 grant execute on function public.get_game_status() to anon,authenticated;
 
 create policy "admin manages game settings" on public.game_settings for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
+drop policy if exists "public reads game status" on public.game_settings;
+create policy "public reads game status" on public.game_settings for select to anon using(true);
+revoke all on public.game_settings from anon;
+grant select (is_open,game_title) on public.game_settings to anon;
 create policy "admin manages teams" on public.teams for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 drop policy if exists "admin manages family codes" on public.family_codes;
 create policy "admin manages family codes" on public.family_codes for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
