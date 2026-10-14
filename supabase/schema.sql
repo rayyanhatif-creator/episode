@@ -84,6 +84,17 @@ create or replace view public.public_leaderboard as
 grant select on public.public_stages to anon,authenticated;
 grant select on public.public_leaderboard to anon,authenticated;
 
+create or replace function public.get_game_status()
+returns jsonb language sql stable security definer set search_path = '' as $
+ select jsonb_build_object(
+  'success',true,
+  'is_open',coalesce((select is_open from public.game_settings where id=true),false),
+  'game_title',coalesce((select game_title from public.game_settings where id=true),'شفرة الكنز')
+ );
+$;
+revoke all on function public.get_game_status() from public;
+grant execute on function public.get_game_status() to anon,authenticated;
+
 create policy "admin manages game settings" on public.game_settings for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 create policy "admin manages teams" on public.teams for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 drop policy if exists "admin manages family codes" on public.family_codes;
