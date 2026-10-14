@@ -10,6 +10,15 @@ const demoStages = [
 ];
 const familyColorLabels = { white:'الأبيض', blue:'الأزرق', yellow:'الأصفر' };
 const familyColorClasses = { white:'white', blue:'blue', yellow:'yellow' };
+const deviceIdStorageKey = 'shifrat-device-id';
+function getDeviceId(){
+  let id = localStorage.getItem(deviceIdStorageKey);
+  if(!id){
+    id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(24)),b=>b.toString(16).padStart(2,'0')).join('');
+    localStorage.setItem(deviceIdStorageKey,id);
+  }
+  return id;
+}
 const demoTeams = [
   {id:'t1',name:'الصقور',points:240,progress:3,color:'gold'},
   {id:'t2',name:'الذئاب',points:180,progress:2,color:'blue'},
@@ -42,11 +51,12 @@ export default function App(){
 
   async function refreshTeamState(token,{silent=false}={}){
     if(!isSupabaseConfigured||!token)return false;
-    const {data,error}=await supabase.rpc('get_team_game_state',{p_session_token:token});
+    const {data,error}=await supabase.rpc('get_team_game_state',{p_session_token:token,p_device_id:getDeviceId()});
     if(error||!data?.success){
-      if(!silent)setNotice(data?.message||'تعذر تحميل تقدم الفريق. حاول تسجيل الدخول من جديد.');
+      if(!silent||data?.code==='device_mismatch')setNotice(data?.message||'تعذر تحميل تقدم الفريق. حاول تسجيل الدخول من جديد.');
       localStorage.removeItem('shifrat-team-session');
       setTeam(null);
+      if(data?.code==='device_mismatch')setView('home');
       return false;
     }
     setTeam({...data.team,token});
@@ -126,7 +136,7 @@ export default function App(){
     if(!teamName.trim()||!sessionCode.trim()){setNotice('أدخل اسم الفريق ورمز الدخول.');return}
     if(!isSupabaseConfigured){setNotice('الموقع غير متصل بقاعدة البيانات حاليًا. حاول لاحقًا.');return}
     setBusy(true);
-    const {data,error}=await supabase.rpc('join_game',{p_team_name:teamName.trim(),p_session_code:sessionCode.trim()});
+    const {data,error}=await supabase.rpc('join_game',{p_team_name:teamName.trim(),p_session_code:sessionCode.trim(),p_device_id:getDeviceId()});
     setBusy(false);
     if(error||!data?.success){setNotice(data?.message||'تعذر الدخول. تحقق من رمز الأسرة وحالة المسابقة.');return}
     const saved={id:data.team_id,name:data.team_name,token:data.session_token};
@@ -140,7 +150,7 @@ export default function App(){
     e.preventDefault();if(!answer.trim()||!currentStage)return;
     if(!team?.token||!currentStage||currentStage.status==='locked'||currentStage.status==='completed')return;
     setBusy(true);setFeedback('');
-    const {data,error}=await supabase.rpc('submit_stage_answer',{p_session_token:team.token,p_stage_id:currentStage.id,p_answer:answer.trim(),p_phase:answerPhase});
+    const {data,error}=await supabase.rpc('submit_stage_answer',{p_session_token:team.token,p_stage_id:currentStage.id,p_answer:answer.trim(),p_device_id:getDeviceId(),p_phase:answerPhase});
     setBusy(false);
     if(error){setFeedback('تعذر إرسال الإجابة الآن. تحقق من اتصال الإنترنت ثم حاول مجددًا.');return}
     setFeedback(data?.message||'تم استلام الإجابة.');
@@ -217,7 +227,7 @@ export default function App(){
     if((team.hints_remaining??(3-(team.hints_used||0)))<=0){setFeedback('استهلكتم التلميحات الثلاث المتاحة للأسرة.');return;}
     if(!window.confirm('استخدام التلميحة سيخصم نصف نقاط هذه المرحلة، وسيُحتسب من التلميحات الثلاث المتاحة للأسرة. هل تريدون المتابعة؟'))return;
     setBusy(true);setFeedback('');
-    const {data,error}=await supabase.rpc('request_team_hint',{p_session_token:team.token,p_stage_id:currentStage.id});
+    const {data,error}=await supabase.rpc('request_team_hint',{p_session_token:team.token,p_stage_id:currentStage.id,p_device_id:getDeviceId()});
     setBusy(false);
     if(error||!data?.success){setFeedback(data?.message||'تعذر تسجيل التلميحة. حاولوا مرة أخرى.');return;}
     setTeam(v=>({...v,hints_used:data.hints_used,hints_remaining:data.hints_remaining}));
