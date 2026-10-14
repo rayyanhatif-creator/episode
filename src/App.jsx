@@ -18,7 +18,7 @@ function Brand(){return <div className="brand"><div className="brand-mark"><KeyR
 
 export default function App(){
   const [view,setView]=useState('home'),[teamName,setTeamName]=useState(''),[sessionCode,setSessionCode]=useState('');
-  const [team,setTeam]=useState(null),[stages,setStages]=useState(demoStages),[teams,setTeams]=useState(demoTeams);
+  const [team,setTeam]=useState(null),[stages,setStages]=useState(demoStages),[teams,setTeams]=useState(demoTeams),[gameOpen,setGameOpen]=useState(null);
   const [activeStage,setActiveStage]=useState(null),[answer,setAnswer]=useState(''),[feedback,setFeedback]=useState('');
   const [hintVisible,setHintVisible]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminSession,setAdminSession]=useState(false);
@@ -53,11 +53,13 @@ export default function App(){
     });
     let live=true;
     async function load(){
-      const [a,b]=await Promise.all([
+      const [a,b,status]=await Promise.all([
         supabase.from('public_stages').select('id,title,number,description,status,sort_order,points_reward').order('sort_order'),
-        supabase.from('public_leaderboard').select('id,name,points,progress').order('points',{ascending:false}).limit(10)
+        supabase.from('public_leaderboard').select('id,name,points,progress').order('points',{ascending:false}).limit(10),
+        supabase.rpc('get_game_status')
       ]);
       if(!live)return;
+      setGameOpen(status.data?.success?Boolean(status.data.is_open):false);
       if(b.data)setTeams(b.data.map((t,i)=>({...t,color:['gold','blue','purple'][i%3]})));
       const saved=localStorage.getItem('shifrat-team-session');
       if(saved){
@@ -79,6 +81,7 @@ export default function App(){
     e.preventDefault();setNotice('');
     if(!teamName.trim()||!sessionCode.trim()){setNotice('أدخل اسم الفريق ورمز الدخول.');return}
     if(!isSupabaseConfigured){setNotice('الموقع غير متصل بقاعدة البيانات حاليًا. حاول لاحقًا.');return}
+    if(gameOpen===false){setNotice('المسابقة مغلقة حاليًا. انتظر إعلان فتحها من المنظّم.');return}
     setBusy(true);
     const {data,error}=await supabase.rpc('join_game',{p_team_name:teamName.trim(),p_session_code:sessionCode.trim()});
     setBusy(false);
@@ -154,7 +157,7 @@ export default function App(){
       <button className={view==='leaderboard'?'nav-link active':'nav-link'} onClick={()=>setView('leaderboard')}>لوحة الترتيب</button>
       <button className="nav-link" onClick={()=>{setView('admin-login');setNotice('')}}>المشرف <LockKeyhole size={14}/></button>
     </nav><button className="mobile-menu" aria-label="القائمة" onClick={()=>setView(view==='admin-login'?'home':'admin-login')}><Menu/></button>
-    <div className="live-pill"><span className="live-dot"/>{isSupabaseConfigured?'متصل بالنظام':'وضع المعاينة'}</div></header>
+    <div className="live-pill"><span className="live-dot"/>{!isSupabaseConfigured?'وضع المعاينة':gameOpen===null?'جارٍ التحقق':gameOpen?'المسابقة مفتوحة':'المسابقة مغلقة'}</div></header>
     {notice&&<div className="notice" role="status"><span>{notice}</span><button onClick={()=>setNotice('')} aria-label="إغلاق"><X size={16}/></button></div>}
 
     {view==='home'&&<main>
