@@ -264,7 +264,11 @@ export default function App(){
       if(updateError){setNotice(`فشل الحفظ: ${updateError.message||'تحقق من صلاحية المشرف واتصال قاعدة البيانات.'}`);return;}
       const {data:verify,error:verifyError}=await supabase.from('stage_questions').select('id,prompt,hint,answer_text,answer_hash,final_answer_text,final_answer_hash,points_reward').eq('stage_id',editStage.id).eq('variant_no',q.variant_no).maybeSingle();
       if(verifyError||!verify){setNotice(verifyError?`تعذر التأكد من الحفظ: ${verifyError.message}`:'لم يعثر النظام على نسخة السؤال بعد الحفظ.');return;}
-      let saveMessage='تم حفظ الحقل المحدد والتأكد من وجوده في قاعدة البيانات.';
+      const verifyField={prompt:'prompt',hint:'hint',answer:'answer_text',finalAnswer:'final_answer_text',points:'points_reward'}[field];
+      const storedValue=verify?.[verifyField];
+      const matches=field==='points'?Number(storedValue)===Number(nextValue):(storedValue??'')===(nextValue??'');
+      if(!matches){setNotice('لم يتغير الحقل في قاعدة البيانات. غالبًا صلاحية التعديل مرفوضة أو لم يصل التحديث؛ جرّب تسجيل الخروج من لوحة المشرف ثم الدخول مجددًا.');return;}
+      let saveMessage='تم حفظ الحقل المحدد والتأكد من تطابقه مع قاعدة البيانات.';
       if(q.variant_no===1&&(field==='answer'||field==='finalAnswer')){
         const legacyPatch=field==='answer'?{answer_text:nextValue,answer_hash:patch.answer_hash}:{final_answer_text:nextValue,final_answer_hash:patch.final_answer_hash};
         const {error:legacyError}=await supabase.from('stages').update(legacyPatch).eq('id',editStage.id);
