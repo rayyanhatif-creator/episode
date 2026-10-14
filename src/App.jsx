@@ -274,9 +274,6 @@ export default function App(){
       <label>تأكيد كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type="password" value={registerConfirmPassword} onChange={e=>setRegisterConfirmPassword(e.target.value)} placeholder="أعد كتابة كلمة المرور" autoComplete="new-password" minLength={8} required/></div></label>
       <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ إنشاء الحساب...':'إنشاء الحساب'} <ArrowLeft size={17}/></button></form><button type="button" className="back-link centered" onClick={()=>{setNotice('');setView('admin-login')}}>العودة لتسجيل الدخول</button></div></main>}
 
-    {view==='password-recovery'&&<main className="admin-login-view">
-
-
     {view==='password-recovery'&&<main className="admin-login-view"><div className="admin-login-card"><div className="admin-lock"><KeyRound size={27}/></div><div className="eyebrow">استعادة الحساب</div><h1>نسيت <span>كلمة المرور؟</span></h1><p>أدخل بريد المشرف لإرسال رابط استعادة جديد.</p><form onSubmit={requestPasswordRecovery}>
       <label>البريد الإلكتروني<div className="input-wrap"><Users size={17}/><input type="email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="البريد المسجل للمشرف" required/></div></label>
       <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الإرسال...':'إرسال رابط الاستعادة'} <ArrowLeft size={17}/></button></form><button className="back-link centered" onClick={()=>{setNotice('');setView('admin-login')}}>العودة لتسجيل الدخول</button></div></main>}
