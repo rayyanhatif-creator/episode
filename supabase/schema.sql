@@ -37,6 +37,7 @@ create table if not exists public.stages (
  prompt text not null,
  answer_hash text not null,
  hint text,
+ scrambled_sentence text,
  status text not null default 'locked' check(status in ('locked','current','completed')),
  points_reward integer not null default 100 check(points_reward between 0 and 10000),
  created_at timestamptz not null default now(),
@@ -148,70 +149,76 @@ exception when unique_violation then return jsonb_build_object('success',false,'
 end; $$;
 
 create or replace function public.get_team_game_state(p_session_token text)
-returns jsonb language plpgsql security definer set search_path = '' as $$
-declare t public.teams%rowtype; unlocked_through integer; stage_list jsonb;
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  t public.teams%rowtype;
+  stage_list jsonb;
 begin
- if p_session_token is null or char_length(p_session_token)<20 then
-  return jsonb_build_object('success',false,'message','جلسة الفريق غير صالحة. سجّل الدخول برمز الأسرة مرة أخرى.');
- end if;
- select * into t from public.teams
- where session_token_hash=encode(extensions.digest(p_session_token,'sha256'),'hex') and is_active=true;
- if not found then
-  return jsonb_build_object('success',false,'message','انتهت جلسة الفريق. سجّل الدخول برمز الأسرة مرة أخرى.');
- end if;
- select count(distinct stage_id)::integer into t.progress from public.answer_submissions
- where team_id=t.id and status='accepted';
- select coalesce(sum(s.points_reward),0)::integer into t.points from public.stages s
- where exists (select 1 from public.answer_submissions a where a.team_id=t.id and a.stage_id=s.id and a.status='accepted');
- unlocked_through:=((t.progress/4)+1)*4;
- select coalesce(jsonb_agg(jsonb_build_object(
-  'id',s.id,'title',s.title,'number',s.number,'description',s.description,'sort_order',s.sort_order,
-  'points_reward',s.points_reward,
-  'status',case when exists(select 1 from public.answer_submissions a where a.team_id=t.id and a.stage_id=s.id and a.status='accepted')
-    then 'completed' when s.sort_order<=unlocked_through then 'current' else 'locked' end,
-  'prompt',case when s.sort_order<=unlocked_through then s.prompt else null end,
-  'hint',case when s.sort_order<=unlocked_through then s.hint else null end
- ) order by s.sort_order),'[]'::jsonb) into stage_list from public.stages s;
- return jsonb_build_object('success',true,
-  'team',jsonb_build_object('id',t.id,'name',t.name,'points',t.points,'progress',t.progress),
-  'stages',stage_list);
-end; $$;
+  if p_session_token IS null OR char_length(p_session_token) < 20 then
+    return jsonb_build_object('success', false, 'message', 'جلسة الفريق غير صالحة. سجّل الدخول برمز الأسرة مرة أخرى.');
+  end IF;
+  select * into t from public.teams
+  where session_token_hash = encode(extensions.digest(p_session_token, 'sha256'), 'hex') and is_active = true;
+  if NOT FOUND then
+    return jsonb_build_object('success', false, 'message', 'انتهت جلسة الفريق. سجّل الدخول برمز الأسرة مرة أخرى.');
+  end IF;
+  select count(distinct stage_id)::integer into t.progress from public.answer_submissions
+  where team_id = t.id and status = 'accepted';
+  select coalesce(sum(s.points_reward), 0)::integer into t.points from public.stages s
+  where exists (select 1 from public.answer_submissions a where a.team_id = t.id and a.stage_id = s.id and a.status = 'accepted');
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', s.id, 'title', s.title, 'number', s.number, 'description', s.description,
+    'sort_order', s.sort_order, 'points_reward', s.points_reward,
+    'status', case
+      when exists (select 1 from public.answer_submissions a where a.team_id = t.id and a.stage_id = s.id and a.status = 'accepted') then 'completed'
+      when s.status = 'current' then 'current' else 'locked' end,
+    'prompt', case when s.status = 'current' then s.prompt else null end,
+    'hint', case when s.status = 'current' then s.hint else null end,
+    'scrambled_sentence', case when s.status = 'current' then s.scrambled_sentence else null end
+  ) order by s.sort_order), '[]'::jsonb) into stage_list from public.stages s;
+  return jsonb_build_object('success', true,
+    'team', jsonb_build_object('id', t.id, 'name', t.name, 'points', t.points, 'progress', t.progress),
+    'stages', stage_list);
+end;
+$$;
 
-create or replace function public.submit_stage_answer(p_session_token text,p_stage_id uuid,p_answer text)
+create or replace function public.submit_stage_answer(p_session_token text, p_stage_id uuid, p_answer text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare t public.teams%rowtype; s public.stages%rowtype; ok boolean; unlocked_through integer; already_done boolean;
+declare
+  t public.teams%rowtype; s public.stages%rowtype; ok boolean; already_done boolean;
 begin
- if p_answer is null or char_length(trim(p_answer))=0 or char_length(p_answer)>200 then
-  return jsonb_build_object('success',false,'message','اكتب إجابة صالحة.');
- end if;
- select * into t from public.teams
- where session_token_hash=encode(extensions.digest(p_session_token,'sha256'),'hex') and is_active=true for update;
- if not found then return jsonb_build_object('success',false,'message','انتهت جلسة الفريق. سجّل الدخول مرة أخرى.'); end if;
- select count(distinct stage_id)::integer into t.progress from public.answer_submissions
- where team_id=t.id and status='accepted';
- unlocked_through:=((t.progress/4)+1)*4;
- select * into s from public.stages where id=p_stage_id;
- if not found then return jsonb_build_object('success',false,'message','المرحلة غير موجودة.'); end if;
- if s.sort_order>unlocked_through then
-  return jsonb_build_object('success',false,'message','أكمل المراحل الأربع الحالية أولًا لفتح المجموعة التالية.');
- end if;
- select exists(select 1 from public.answer_submissions where team_id=t.id and stage_id=s.id and status='accepted') into already_done;
- if already_done then
-  return jsonb_build_object('success',true,'correct',true,'already_completed',true,'message','أنجزتم هذه المرحلة سابقًا، ونقاطها محفوظة.');
- end if;
- ok:=encode(extensions.digest(lower(trim(p_answer)),'sha256'),'hex')=s.answer_hash;
- insert into public.answer_submissions(team_id,stage_id,answer_text,is_correct,status)
- values(t.id,s.id,trim(p_answer),ok,case when ok then 'accepted' else 'rejected' end);
- if ok then
-  update public.teams set points=points+s.points_reward,progress=progress+1 where id=t.id;
-  insert into public.audit_logs(action,entity_type,entity_id,details)
-  values('correct_answer','stage',s.id::text,jsonb_build_object('team_id',t.id,'points',s.points_reward));
-  return jsonb_build_object('success',true,'correct',true,'already_completed',false,
-    'points_awarded',s.points_reward,'message','إجابة صحيحة! أُضيفت نقاط المرحلة إلى رصيد فريقكم.');
- end if;
- return jsonb_build_object('success',true,'correct',false,'message','مو هي الإجابة الصحيحة، راجعوا الأدلة وحاولوا مرة ثانية.');
-end; $$;
-
+  if p_answer IS null OR char_length(trim(p_answer)) = 0 OR char_length(p_answer) > 200 then
+    return jsonb_build_object('success', false, 'message', 'اكتب إجابة صالحة.');
+  end IF;
+  select * into t from public.teams
+  where session_token_hash = encode(extensions.digest(p_session_token, 'sha256'), 'hex') and is_active = true FOR UPDATE;
+  if NOT FOUND then return jsonb_build_object('success', false, 'message', 'انتهت جلسة الفريق. سجّل الدخول مرة أخرى.'); end IF;
+  select * into s from public.stages where id = p_stage_id;
+  if NOT FOUND then return jsonb_build_object('success', false, 'message', 'المرحلة غير موجودة.'); end IF;
+  if s.status <> 'current' then
+    return jsonb_build_object('success', false, 'message', 'هذه المرحلة مقفلة حاليًا من المشرف.');
+  end IF;
+  select exists(select 1 from public.answer_submissions where team_id = t.id and stage_id = s.id and status = 'accepted') into already_done;
+  if already_done then
+    return jsonb_build_object('success', true, 'correct', true, 'already_completed', true, 'message', 'أنجزتم هذه المرحلة سابقًا، ونقاطها محفوظة.');
+  end IF;
+  ok := encode(extensions.digest(lower(trim(p_answer)), 'sha256'), 'hex') = s.answer_hash;
+  INSERT into public.answer_submissions(team_id, stage_id, answer_text, is_correct, status)
+  values(t.id, s.id, trim(p_answer), ok, case when ok then 'accepted' else 'rejected' end);
+  if ok then
+    update public.teams set points = points + s.points_reward, progress = progress + 1 where id = t.id;
+    INSERT into public.audit_logs(action, entity_type, entity_id, details)
+    values('correct_answer', 'stage', s.id::text, jsonb_build_object('team_id', t.id, 'points', s.points_reward));
+    return jsonb_build_object('success', true, 'correct', true, 'already_completed', false,
+      'points_awarded', s.points_reward, 'message', 'إجابة صحيحة! أُضيفت نقاط المرحلة إلى رصيد فريقكم.');
+  end IF;
+  return jsonb_build_object('success', true, 'correct', false, 'message', 'مو هي الإجابة الصحيحة، راجعوا الأدلة وحاولوا مرة ثانية.');
+end;
+$$;
 revoke all on function public.join_game(text,text) from public;
 revoke all on function public.get_team_game_state(text) from public;
 revoke all on function public.submit_stage_answer(text,uuid,text) from public;
