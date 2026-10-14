@@ -33,6 +33,7 @@ export default function App(){
   const [registerPassword,setRegisterPassword]=useState(''),[registerConfirmPassword,setRegisterConfirmPassword]=useState('');
   const completed=useMemo(()=>stages.filter(s=>s.status==='completed').length,[stages]);
   const currentStage=(activeStage&&stages.find(s=>s.id===activeStage.id))||stages.find(s=>s.status==='current')||null;
+  useEffect(()=>{if(currentStage?.status==='current'&&currentStage.hint_unlocked)setAnswerPhase('final');else if(!currentStage?.hint_unlocked)setAnswerPhase('riddle');},[currentStage?.id,currentStage?.status,currentStage?.hint_unlocked]);
 
   async function refreshTeamState(token,{silent=false}={}){
     if(!isSupabaseConfigured||!token)return false;
@@ -85,11 +86,17 @@ export default function App(){
       if(a.data)setStages(a.data.map(s=>({...s,prompt:null,hint:null,scrambled_sentence:null})));
     }
     load();
+    const statusPoll=setInterval(async()=>{
+      const {data}=await supabase.rpc('get_game_status');
+      if(data?.success)setGameOpen(Boolean(data.is_open));
+      const savedSession=localStorage.getItem('shifrat-team-session');
+      if(savedSession){try{const parsed=JSON.parse(savedSession);if(parsed?.token)await refreshTeamState(parsed.token,{silent:true});}catch{}}
+    },5000);
     const ch=supabase.channel('game-public-updates')
       .on('postgres_changes',{event:'*',schema:'public',table:'stages'},load)
       .on('postgres_changes',{event:'*',schema:'public',table:'teams'},load)
       .on('postgres_changes',{event:'*',schema:'public',table:'game_settings'},load).subscribe();
-    return()=>{live=false;supabase.removeChannel(ch);authListener.subscription.unsubscribe()};
+    return()=>{live=false;clearInterval(statusPoll);supabase.removeChannel(ch);authListener.subscription.unsubscribe()};
   },[]);
 
   async function refreshAdminData(){
