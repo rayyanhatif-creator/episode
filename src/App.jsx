@@ -78,7 +78,7 @@ export default function App(){
           if(session?.token&&await refreshTeamState(session.token,{silent:true})){setView('game');return;}
         }catch{}
       }
-      if(a.data)setStages(a.data.map(s=>({...s,status:s.sort_order<=4?'current':'locked',prompt:null,hint:null,scrambled_sentence:null})));
+      if(a.data)setStages(a.data.map(s=>({...s,prompt:null,hint:null,scrambled_sentence:null})));
     }
     load();
     const ch=supabase.channel('game-public-updates')
@@ -198,7 +198,7 @@ export default function App(){
     if(!newTitle.trim()||!newPrompt.trim()||!newAnswer.trim()){setNotice('أكمل جميع بيانات المرحلة.');return}
     if(!isSupabaseConfigured||!adminSession){setNotice('يلزم تسجيل دخول المشرف وربط Supabase لحفظ المرحلة.');return}
     const allCurrentStagesCompleted=stages.length>0&&stages.every(s=>s.status==='completed');
-    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),hint:newHint.trim()||null,scrambled_sentence:newScrambled.trim()||null,status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:stages.length+1,points_reward:Math.max(0,Math.min(10000,Number(newPoints)||100)),description:newDescription.trim()||'مرحلة جديدة'});
+    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),hint:newHint.trim()||null,scrambled_sentence:newScrambled.trim()||null,status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:Math.max(0,...adminStages.map(s=>Number(s.sort_order)||0))+1,points_reward:Math.max(0,Math.min(10000,Number(newPoints)||100)),description:newDescription.trim()||'مرحلة جديدة'});
     if(error){setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف وترتيب المراحل.');return}
     setNewTitle('');setNewPrompt('');setNewAnswer('');setNewHint('');setNewScrambled('');setNewDescription('');setNewPoints('100');setNotice('تمت إضافة المرحلة بنجاح.');
     await refreshAdminData();
