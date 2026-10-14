@@ -23,7 +23,7 @@ export default function App(){
   const [hintVisible,setHintVisible]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminSession,setAdminSession]=useState(false);
   const [newTitle,setNewTitle]=useState(''),[newDescription,setNewDescription]=useState('');
-  const blankQuestion=()=>({prompt:'',answer:'',hint:'',scrambled:'',finalAnswer:'',points:'100'});
+  const blankQuestion=()=>({prompt:'',answer:'',hint:'',finalAnswer:'',points:'100'});
   const [newQuestions,setNewQuestions]=useState([blankQuestion(),blankQuestion(),blankQuestion()]);
   const [answerPhase,setAnswerPhase]=useState('riddle');
   const [adminStages,setAdminStages]=useState([]),[adminTeams,setAdminTeams]=useState([]),[familyCodes,setFamilyCodes]=useState([]),[gameSettings,setGameSettings]=useState({is_open:false}),[editStage,setEditStage]=useState(null);
@@ -209,14 +209,29 @@ export default function App(){
     return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
 
+  async function requestHint(){
+    if(!team?.token||!currentStage||currentStage.status!=='current'||busy)return;
+    if(currentStage.hint_used){setFeedback('استخدمتم تلميحة لهذه المرحلة بالفعل.');return;}
+    if((team.hints_remaining??(3-(team.hints_used||0)))<=0){setFeedback('استهلكتم التلميحات الثلاث المتاحة للأسرة.');return;}
+    if(!window.confirm('استخدام التلميحة سيخصم نصف نقاط هذه المرحلة، وسيُحتسب من التلميحات الثلاث المتاحة للأسرة. هل تريدون المتابعة؟'))return;
+    setBusy(true);setFeedback('');
+    const {data,error}=await supabase.rpc('request_team_hint',{p_session_token:team.token,p_stage_id:currentStage.id});
+    setBusy(false);
+    if(error||!data?.success){setFeedback(data?.message||'تعذر تسجيل التلميحة. حاولوا مرة أخرى.');return;}
+    setTeam(v=>({...v,hints_used:data.hints_used,hints_remaining:data.hints_remaining}));
+    setStages(v=>v.map(stage=>stage.id===currentStage.id?({...stage,hint_used:true}):stage));
+    setFeedback(data.message||'روحوا للمسؤول عن البرنامج يعطيكم التلميحة.');
+    await refreshTeamState(team.token,{silent:true});
+  }
+
   function updateNewQuestion(index,key,value){
     setNewQuestions(current=>current.map((q,i)=>i===index?({...q,[key]:value}):q));
   }
 
   async function createStage(e){
     e.preventDefault();
-    if(!newTitle.trim()||newQuestions.some(q=>!q.prompt.trim()||!q.answer.trim()||!q.hint.trim()||!q.scrambled.trim()||!q.finalAnswer.trim())){
-      setNotice('أكمل بيانات الأسئلة الثلاثة، مع الإجابة والتلميح والكلمات المبعثرة والحل النهائي لكل سؤال.');return;
+    if(!newTitle.trim()||newQuestions.some(q=>!q.prompt.trim()||!q.answer.trim()||!q.hint.trim()||!q.finalAnswer.trim())){
+      setNotice('أكمل بيانات الأسئلة الثلاثة، مع الإجابة والتلميح ومكان الورقة والحل النهائي لكل سؤال.');return;
     }
     if(!isSupabaseConfigured||!adminSession){setNotice('يلزم تسجيل دخول المشرف وربط Supabase لحفظ المرحلة.');return}
     setBusy(true);
@@ -225,7 +240,7 @@ export default function App(){
     const first=newQuestions[0];
     const {data:stage,error}=await supabase.from('stages').insert({
       title:newTitle.trim(),prompt:first.prompt.trim(),answer_hash:await hashAnswer(first.answer),answer_text:first.answer.trim(),final_answer_text:first.finalAnswer.trim(),
-      hint:first.hint.trim(),scrambled_sentence:first.scrambled.trim(),
+      hint:first.hint.trim(),
       status:adminStages.length===0||allCurrentStagesCompleted?'current':'locked',
       sort_order:sortOrder,points_reward:Math.max(0,Math.min(10000,Number(first.points)||100)),
       description:newDescription.trim()||'مرحلة جديدة'
@@ -233,7 +248,7 @@ export default function App(){
     if(error||!stage){setBusy(false);setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف واتصال قاعدة البيانات.');return}
     const variants=await Promise.all(newQuestions.map(async(q,index)=>({
       stage_id:stage.id,variant_no:index+1,prompt:q.prompt.trim(),answer_hash:await hashAnswer(q.answer),answer_text:q.answer.trim(),
-      hint:q.hint.trim(),scrambled_sentence:q.scrambled.trim(),final_answer_hash:await hashAnswer(q.finalAnswer),final_answer_text:q.finalAnswer.trim(),
+      hint:q.hint.trim(),final_answer_hash:await hashAnswer(q.finalAnswer),final_answer_text:q.finalAnswer.trim(),
       points_reward:Math.max(0,Math.min(10000,Number(q.points)||100))
     })));
     const {error:questionError}=await supabase.from('stage_questions').insert(variants);
@@ -298,11 +313,11 @@ export default function App(){
         <div className="hero-stats"><div><strong>{teams.length.toLocaleString('ar')}</strong><span>فرق مشاركة</span></div><i/><div><strong>{stages.length.toLocaleString('ar')}</strong><span>مراحل التحدي</span></div><i/><div><strong>{completed.toLocaleString('ar')}</strong><span>مراحل مكتملة</span></div></div>
       </div><div className="hero-art" aria-label="رسم توضيحي لصندوق كنز"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="star star-a">✦</div><div className="star star-b">✧</div><div className="star star-c">✦</div><div className="treasure-glow"/><div className="treasure-chest"><div className="chest-lid"><div className="chest-band"/></div><div className="chest-body"><div className="chest-band"/><div className="chest-lock"><KeyRound size={25}/></div></div><div className="chest-foot left"/><div className="chest-foot right"/></div><div className="floating-tag tag-top"><Compass size={15}/> اتبع الدليل</div><div className="floating-tag tag-bottom"><Zap size={15}/> فك الشفرة</div><div className="art-caption">الكنز لا يصل إليه إلا من يبحث</div></div></section>
 
-      <section className="join-section" id="join-card"><div className="section-heading"><div className="section-icon"><KeyRound size={20}/></div><div><h2>ادخل إلى ساحة التحدي</h2><p>أدخل بيانات فريقك للانطلاق في الرحلة</p></div></div>
+      <section className="join-section" id="join-card"><div className="section-heading"><div className="section-icon"><KeyRound size={20}/></div><div><h2>ادخل إلى ساحة التحدي</h2><p>أدخل اسم الفريق ورمز الأسرة. يمكن لجميع أفراد الأسرة الدخول بالرمز نفسه.</p></div></div>
         <form className="join-form" onSubmit={joinGame}><label>اسم الفريق<div className="input-wrap"><Users size={18}/><input value={teamName} onChange={e=>setTeamName(e.target.value)} placeholder="مثال: صقور الصحراء" maxLength={50} required/></div></label>
         <label>رمز الدخول<div className="input-wrap"><KeyRound size={18}/><input value={sessionCode} onChange={e=>setSessionCode(e.target.value)} placeholder="أدخل الرمز الذي استلمته" maxLength={80} required/></div></label>
         <button className="btn btn-gold join-submit" disabled={busy}>{busy?<RefreshCw className="spin" size={18}/>:<ArrowUpLeft size={18}/>} {busy?'جارٍ التحقق...':'دخول الفريق'}</button></form>
-        <div className="secure-note"><ShieldCheck size={15}/> رمز الدخول خاص بفريقك — لا تشاركه مع الفرق الأخرى</div></section>
+        <div className="secure-note"><ShieldCheck size={15}/> شاركوا رمز الأسرة نفسه مع جميع أفراد الأسرة؛ كل شخص يدخل بجلسة مستقلة ويشترك معكم في النقاط والتلميحات.</div></section>
 
       <section className="stages-section"><div className="section-title-row"><div><div className="eyebrow">خارطة الرحلة</div><h2>مراحل البحث عن الكنز</h2></div><span className="muted-label">{stages.length} مراحل</span></div>
         <div className="stage-grid">{stages.length?stages.map((s,i)=><button className={'stage-card '+s.status} key={s.id} onClick={()=>{if(s.status!=='locked'){setActiveStage(s);if(team)setView('game');else setNotice('ادخل بيانات فريقك أولًا لبدء المرحلة.')}}}>
@@ -315,8 +330,8 @@ export default function App(){
       <div className="game-header"><div><div className="eyebrow"><Radio size={14}/> ساحة التحدي</div><h1>حيّاكم يا <span>{team?.name||teamName}</span></h1><p>ركزوا مع بعض، كل تفصيلة ممكن تكون المفتاح.</p></div><div className="team-badge"><Users size={17}/><span>فريق مشارك</span></div></div>
       <div className="game-layout"><section className="panel puzzle-panel"><div className="panel-kicker"><span className="puzzle-icon"><CircleHelp size={22}/></span><span>{currentStage?.status==='completed'?'مرحلة مكتملة':'المرحلة المختارة'} <b>{currentStage?.number||'—'}</b></span></div>
         <h2>{currentStage?.title||(stages.length?'أكملتم المراحل المتاحة!':'الرحلة تستعد للانطلاق')}</h2><p className="puzzle-prompt">{currentStage?.prompt||(stages.length?'ترقّبوا إضافة المراحل التالية من منظّم المسابقة.':'لم تُضف مراحل المسابقة بعد. ارجعوا قريبًا لبدء المغامرة.')}</p>
-        {currentStage?.hint_unlocked&&<><div className="hint-box"><Lightbulb size={17}/><span>{currentStage.hint||'اتبعوا التلميح للعثور على الورقة المخبأة.'}</span></div><div className="scrambled-box"><strong>الكلمات أو الحروف الموجودة على الورقة</strong><p>{currentStage.scrambled_sentence}</p></div></>}
-        <form className="answer-form" onSubmit={submitAnswer}><label htmlFor="answer">{answerPhase==='riddle'?'إجابة السؤال':'الحل النهائي من الورقة'}</label><div className="input-wrap answer-input"><input id="answer" value={answer} onChange={e=>setAnswer(e.target.value)} placeholder={answerPhase==='final'?'رتّب الحروف أو الكلمات واكتب الحل هنا':'اكتب إجابة السؤال هنا...'} maxLength={200} disabled={!currentStage||currentStage.status!=='current'||busy||(answerPhase==='final'&&!currentStage.hint_unlocked)} required/><button className="answer-send" disabled={busy||!currentStage||currentStage.status!=='current'||(answerPhase==='final'&&!currentStage.hint_unlocked)}>{busy?<RefreshCw className="spin" size={18}/>:<ArrowLeft size={18}/>}</button></div><p className="answer-help"><LockKeyhole size={13}/> {currentStage?.status==='completed'?'أنجزتم هذه المرحلة بالفعل.':answerPhase==='final'?'اكتبوا الحل النهائي كما رتّبتموه من الورقة.':'الإجابة الصحيحة تفتح التلميح، وبعدها يظهر مربع الحل النهائي.'}</p></form>
+        {currentStage?.hint_unlocked&&<div className="hint-box"><MapPin size={17}/><span>{currentStage.hint||'اتبعوا التلميح للعثور على الورقة المخبأة.'}</span></div>}
+        <div className="hint-request-row"><div><strong>التلميحات المتاحة للأسرة</strong><p>{Math.max(0,team?.hints_remaining??(3-(team?.hints_used||0)))} من 3 متبقية · التلميحة تقلل نقاط هذه المرحلة للنصف</p></div><button type="button" className="btn btn-ghost" onClick={requestHint} disabled={busy||!currentStage||currentStage.status!=='current'||currentStage.hint_used||(team?.hints_remaining??(3-(team?.hints_used||0)))<=0}>{currentStage?.hint_used?'استخدمتم تلميحة هذه المرحلة':'طلب تلميحة من المشرف'}</button></div><form className="answer-form" onSubmit={submitAnswer}><label htmlFor="answer">{answerPhase==='riddle'?'إجابة السؤال':'الحل النهائي من الورقة'}</label><div className="input-wrap answer-input"><input id="answer" value={answer} onChange={e=>setAnswer(e.target.value)} placeholder={answerPhase==='final'?'رتّب الحروف أو الكلمات واكتب الحل هنا':'اكتب إجابة السؤال هنا...'} maxLength={200} disabled={!currentStage||currentStage.status!=='current'||busy||(answerPhase==='final'&&!currentStage.hint_unlocked)} required/><button className="answer-send" disabled={busy||!currentStage||currentStage.status!=='current'||(answerPhase==='final'&&!currentStage.hint_unlocked)}>{busy?<RefreshCw className="spin" size={18}/>:<ArrowLeft size={18}/>}</button></div><p className="answer-help"><LockKeyhole size={13}/> {currentStage?.status==='completed'?'أنجزتم هذه المرحلة بالفعل.':answerPhase==='final'?'اكتبوا الحل النهائي كما رتّبتموه من الورقة.':'الإجابة الصحيحة تفتح التلميح، وبعدها يظهر مربع الحل النهائي.'}</p></form>
         {feedback&&<div className="feedback" role="status">{feedback}</div>}</section>
         <aside className="panel progress-panel"><h3><Flag size={18}/> تقدم الفريق</h3><div className="progress-number"><strong>{completed}</strong><span>من {stages.length} مراحل</span></div><div className="progress-track"><span style={{width:(stages.length?completed/stages.length*100:0)+'%'}}/></div>
           <div className="mini-stage-list">{stages.map((s,i)=><button key={s.id} className={'mini-stage '+s.status} onClick={()=>{if(s.status!=='locked')setActiveStage(s)}}><span className="mini-stage-dot">{s.status==='completed'?<Check size={13}/>:i+1}</span><span>{s.title}</span>{s.status==='locked'&&<LockKeyhole size={14}/>}</button>)}</div>
@@ -352,7 +367,7 @@ export default function App(){
       <section className="panel admin-stage-panel family-code-panel"><h2>إنشاء رمز دخول لأسرة</h2><p>رمز خاص بالأسرة؛ يمكنهم استخدامه مجددًا باسم الفريق نفسه. يُحفظ الرمز كبصمة مشفّرة ولا يمكن عرضه مجددًا بعد إغلاق نافذة الإنشاء.</p><form onSubmit={createFamilyCode} className="admin-stage-form family-code-form"><label>اسم الأسرة<input value={familyName} onChange={e=>setFamilyName(e.target.value)} placeholder="مثال: أسرة أحمد" minLength={2} maxLength={80} required/></label><button className="btn btn-gold" type="submit"><KeyRound size={17}/> إنشاء رمز الأسرة</button></form>{newFamilyCode&&<div className="generated-code" role="status"><span>رمز الأسرة — انسخه وأرسله الآن</span><strong dir="ltr">{newFamilyCode}</strong><button type="button" className="btn btn-ghost" onClick={()=>navigator.clipboard?.writeText(newFamilyCode).then(()=>setNotice('تم نسخ رمز الأسرة.')).catch(()=>setNotice('انسخ الرمز يدويًا.'))}>نسخ الرمز</button></div>}</section>
       <section className="panel admin-stage-panel"><h2>إضافة مرحلة جديدة</h2><p>أدخل ثلاثة أسئلة مختلفة. كل سؤال له إجابة تفتح التلميح، ثم كلمات الورقة والحل النهائي والنقاط.</p><form onSubmit={createStage} className="admin-stage-form admin-stage-form-expanded">
         <label>عنوان المرحلة<input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="مثال: سر البوصلة" required/></label><label>وصف مختصر<input value={newDescription} onChange={e=>setNewDescription(e.target.value)} placeholder="وصف المرحلة"/></label>
-        {newQuestions.map((q,i)=><div className="question-editor" key={i}><h3>نسخة السؤال {i+1}</h3><label>نص السؤال<textarea value={q.prompt} onChange={e=>updateNewQuestion(i,'prompt',e.target.value)} required placeholder="السؤال الذي ستراه الأسرة"/></label><label>إجابة السؤال<input value={q.answer} onChange={e=>updateNewQuestion(i,'answer',e.target.value)} required placeholder="الإجابة التي تفتح التلميح"/></label><label>التلميح<textarea value={q.hint} onChange={e=>updateNewQuestion(i,'hint',e.target.value)} required placeholder="مكان الورقة أو الدليل"/></label><label>الكلمات أو الحروف المبعثرة<textarea value={q.scrambled} onChange={e=>updateNewQuestion(i,'scrambled',e.target.value)} required placeholder="النص الموجود على الورقة"/></label><label>الحل النهائي الصحيح<input value={q.finalAnswer} onChange={e=>updateNewQuestion(i,'finalAnswer',e.target.value)} required placeholder="الحل الذي يجب أن تكتبه الأسرة"/></label><label>نقاط هذه النسخة<input type="number" min="0" max="10000" value={q.points} onChange={e=>updateNewQuestion(i,'points',e.target.value)} required/></label></div>)}
+        {newQuestions.map((q,i)=><div className="question-editor" key={i}><h3>نسخة السؤال {i+1}</h3><label>نص السؤال<textarea value={q.prompt} onChange={e=>updateNewQuestion(i,'prompt',e.target.value)} required placeholder="السؤال الذي ستراه الأسرة"/></label><label>إجابة السؤال<input value={q.answer} onChange={e=>updateNewQuestion(i,'answer',e.target.value)} required placeholder="الإجابة التي تفتح التلميح"/></label><label>التلميح<textarea value={q.hint} onChange={e=>updateNewQuestion(i,'hint',e.target.value)} required placeholder="مكان الورقة أو الدليل"/></label><label>الحل النهائي الصحيح<input value={q.finalAnswer} onChange={e=>updateNewQuestion(i,'finalAnswer',e.target.value)} required placeholder="الحل الذي يجب أن تكتبه الأسرة"/></label><label>نقاط هذه النسخة<input type="number" min="0" max="10000" value={q.points} onChange={e=>updateNewQuestion(i,'points',e.target.value)} required/></label></div>)}
         <button className="btn btn-gold" type="submit" disabled={busy}>{busy?<RefreshCw className="spin" size={17}/>:<Check size={17}/>} حفظ المرحلة بالأسئلة الثلاثة</button></form>
         <div className="admin-list">{adminStages.map((s,i)=><div className="admin-stage-row" key={s.id}><span>{s.number||String(i+1).padStart(2,'0')}</span><div><strong>{s.title}</strong><small>{s.description||'مرحلة في المسابقة'}</small></div><span className="status-tag">تقدّم تلقائي</span><button className="btn btn-ghost btn-small" onClick={()=>setEditStage({...s,newAnswer:s.answer_text||'',newFinalAnswer:s.final_answer_text||'',questions:(s.questions||[]).map(q=>({...q,newAnswer:q.answer_text||'',newFinalAnswer:q.final_answer_text||''}))})}>تعديل</button><button className="btn btn-ghost btn-small danger" onClick={async()=>{if(!window.confirm('هل تريد حذف هذه المرحلة نهائيًا؟ سيتم حذف إجاباتها المسجلة أيضًا.'))return;const {error}=await supabase.from('stages').delete().eq('id',s.id);if(error){setNotice('تعذر حذف المرحلة.');return;}setNotice('تم حذف المرحلة وإجاباتها المرتبطة.');await refreshAdminData();}}>حذف</button></div>)}</div></section>
       <section className="panel admin-stage-panel"><h2>إدارة الأسر والفرق</h2><p>استبعاد الأسرة يعطّل رمزها وجلسة فريقها ويزيل الفريق من لوحة الترتيب، مع الاحتفاظ بسجله للمراجعة.</p><div className="admin-list">{familyCodes.map(fc=>{const t=adminTeams.find(x=>x.id===fc.used_by_team);return <div className="admin-stage-row family-row" key={fc.id}><div><strong>{fc.family_name}</strong><small>{t?`الفريق: ${t.name} • ${t.points||0} نقطة`:'لم تدخل الأسرة بعد'}</small></div><span className={'status-tag '+(fc.is_active?'current':'')}>{!fc.is_active?'مستبعدة':t&&!t.is_active?'الفريق معطّل':t?'مشاركة':'رمز فعّال'}</span>{fc.is_active&&<button className="btn btn-ghost btn-small danger" onClick={async()=>{if(!window.confirm(`استبعاد ${fc.family_name} من المسابقة؟`))return;const {error:codeError}=await supabase.from('family_codes').update({is_active:false}).eq('id',fc.id);if(codeError){setNotice('تعذر تعطيل رمز الأسرة.');return;}if(fc.used_by_team){const {error:teamError}=await supabase.from('teams').update({is_active:false}).eq('id',fc.used_by_team);if(teamError){setNotice('تعطّل رمز الأسرة، لكن تعذّر تعطيل الفريق. حدّث الصفحة وحاول مرة أخرى.');await refreshAdminData();return;}}setNotice('تم استبعاد الأسرة وتعطيل جلستها.');await refreshAdminData();}}>استبعاد الأسرة</button>}</div>})}{!familyCodes.length&&<p className="empty-state">لا توجد أسر حتى الآن. أنشئ رمزًا لكل أسرة من القسم أعلاه.</p>}</div></section>
