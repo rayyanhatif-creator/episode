@@ -22,7 +22,8 @@ export default function App(){
   const [activeStage,setActiveStage]=useState(null),[answer,setAnswer]=useState(''),[feedback,setFeedback]=useState('');
   const [hintVisible,setHintVisible]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminSession,setAdminSession]=useState(false);
-  const [newTitle,setNewTitle]=useState(''),[newPrompt,setNewPrompt]=useState(''),[newAnswer,setNewAnswer]=useState('');
+  const [newTitle,setNewTitle]=useState(''),[newPrompt,setNewPrompt]=useState(''),[newAnswer,setNewAnswer]=useState(''),[newHint,setNewHint]=useState(''),[newScrambled,setNewScrambled]=useState(''),[newDescription,setNewDescription]=useState(''),[newPoints,setNewPoints]=useState('100');
+  const [adminStages,setAdminStages]=useState([]),[adminTeams,setAdminTeams]=useState([]),[familyCodes,setFamilyCodes]=useState([]),[gameSettings,setGameSettings]=useState({is_open:false}),[editStage,setEditStage]=useState(null);
   const [familyName,setFamilyName]=useState(''),[newFamilyCode,setNewFamilyCode]=useState('');
   const [showPassword,setShowPassword]=useState(false);
   const [newPassword,setNewPassword]=useState(''),[confirmPassword,setConfirmPassword]=useState('');
@@ -53,7 +54,7 @@ export default function App(){
       window.history.replaceState(null,'',window.location.pathname+window.location.search);
     }
     supabase.auth.getSession().then(({data})=>{
-      if(data.session?.user?.app_metadata?.role==='game_admin'){setAdminSession(true);setView(v=>v==='admin-login'?'admin':v);}
+      if(data.session?.user?.app_metadata?.role==='game_admin'){setAdminSession(true);setView('admin');}
     });
     const {data:authListener}=supabase.auth.onAuthStateChange((event,session)=>{
       if(event==='PASSWORD_RECOVERY'){setView('reset-password');setNotice('');}
@@ -74,10 +75,10 @@ export default function App(){
       if(saved){
         try{
           const session=JSON.parse(saved);
-          if(session?.token&&await refreshTeamState(session.token,{silent:true}))return;
+          if(session?.token&&await refreshTeamState(session.token,{silent:true})){setView('game');return;}
         }catch{}
       }
-      if(a.data)setStages(a.data.map(s=>({...s,status:s.sort_order<=4?'current':'locked',prompt:null,hint:null})));
+      if(a.data)setStages(a.data.map(s=>({...s,status:s.sort_order<=4?'current':'locked',prompt:null,hint:null,scrambled_sentence:null})));
     }
     load();
     const ch=supabase.channel('game-public-updates')
@@ -85,6 +86,22 @@ export default function App(){
       .on('postgres_changes',{event:'*',schema:'public',table:'teams'},load).subscribe();
     return()=>{live=false;supabase.removeChannel(ch);authListener.subscription.unsubscribe()};
   },[]);
+
+  async function refreshAdminData(){
+    if(!isSupabaseConfigured||!adminSession)return;
+    const [stageRes,teamRes,codeRes,settingsRes]=await Promise.all([
+      supabase.from('stages').select('id,title,number,description,prompt,hint,scrambled_sentence,answer_hash,status,sort_order,points_reward').order('sort_order'),
+      supabase.from('teams').select('id,name,points,progress,is_active,created_at').order('created_at',{ascending:false}),
+      supabase.from('family_codes').select('id,family_name,is_active,used_by_team,created_at,used_at').order('created_at',{ascending:false}),
+      supabase.from('game_settings').select('is_open,game_title').eq('id',true).maybeSingle()
+    ]);
+    if(stageRes.data)setAdminStages(stageRes.data);
+    if(teamRes.data)setAdminTeams(teamRes.data);
+    if(codeRes.data)setFamilyCodes(codeRes.data);
+    if(settingsRes.data)setGameSettings(settingsRes.data);
+  }
+
+  useEffect(()=>{if(view==='admin'&&adminSession)refreshAdminData();},[view,adminSession]);
 
   async function joinGame(e){
     e.preventDefault();setNotice('');
@@ -181,9 +198,10 @@ export default function App(){
     if(!newTitle.trim()||!newPrompt.trim()||!newAnswer.trim()){setNotice('أكمل جميع بيانات المرحلة.');return}
     if(!isSupabaseConfigured||!adminSession){setNotice('يلزم تسجيل دخول المشرف وربط Supabase لحفظ المرحلة.');return}
     const allCurrentStagesCompleted=stages.length>0&&stages.every(s=>s.status==='completed');
-    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:stages.length+1,description:'مرحلة جديدة'});
+    const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),hint:newHint.trim()||null,scrambled_sentence:newScrambled.trim()||null,status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:stages.length+1,points_reward:Math.max(0,Math.min(10000,Number(newPoints)||100)),description:newDescription.trim()||'مرحلة جديدة'});
     if(error){setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف وترتيب المراحل.');return}
-    setNewTitle('');setNewPrompt('');setNewAnswer('');setNotice('تمت إضافة المرحلة. إذا انتهت المراحل السابقة، فستكون هذه بداية المجموعة الجديدة.');
+    setNewTitle('');setNewPrompt('');setNewAnswer('');setNewHint('');setNewScrambled('');setNewDescription('');setNewPoints('100');setNotice('تمت إضافة المرحلة بنجاح.');
+    await refreshAdminData();
     const {data}=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,points_reward').order('sort_order');
     if(data)setStages(data);
   }
@@ -222,12 +240,12 @@ export default function App(){
 
   return <div className="app-shell">
     <header className="topbar"><Brand/><nav className="desktop-nav">
-      <button className={view==='home'?'nav-link active':'nav-link'} onClick={()=>setView('home')}>الرئيسية</button>
+      {!(view==='game'&&team)&&<><button className={view==='home'?'nav-link active':'nav-link'} onClick={()=>setView('home')}>الرئيسية</button>
       <button className={view==='leaderboard'?'nav-link active':'nav-link'} onClick={()=>setView('leaderboard')}>لوحة الترتيب</button>
-      <button className="nav-link" onClick={()=>{setView('admin-login');setNotice('')}}>المشرف <LockKeyhole size={14}/></button>
-    </nav><button className="mobile-menu" aria-label="القائمة" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(v=>!v)}><Menu/></button>
+      <button className="nav-link" onClick={()=>{setView('admin-login');setNotice('')}}>المشرف <LockKeyhole size={14}/></button></>}
+    </nav>{!(view==='game'&&team)&&<button className="mobile-menu" aria-label="القائمة" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(v=>!v)}><Menu/></button>}
     <div className="live-pill"><span className="live-dot"/>{!isSupabaseConfigured?'وضع المعاينة':gameOpen===null?'جارٍ التحقق':gameOpen?'المسابقة مفتوحة':'المسابقة مغلقة'}</div></header>
-    {mobileNavOpen&&<nav className="mobile-nav-panel" aria-label="القائمة الرئيسية"><button className={view==='home'?'nav-link active':'nav-link'} onClick={()=>{setView('home');setMobileNavOpen(false)}}>الرئيسية</button><button className={view==='leaderboard'?'nav-link active':'nav-link'} onClick={()=>{setView('leaderboard');setMobileNavOpen(false)}}>لوحة الترتيب</button><button className="nav-link" onClick={()=>{setView('admin-login');setMobileNavOpen(false);setNotice('')}}>المشرف <LockKeyhole size={14}/></button></nav>}
+    {mobileNavOpen&&!(view==='game'&&team)&&<nav className="mobile-nav-panel" aria-label="القائمة الرئيسية"><button className={view==='home'?'nav-link active':'nav-link'} onClick={()=>{setView('home');setMobileNavOpen(false)}}>الرئيسية</button><button className={view==='leaderboard'?'nav-link active':'nav-link'} onClick={()=>{setView('leaderboard');setMobileNavOpen(false)}}>لوحة الترتيب</button><button className="nav-link" onClick={()=>{setView('admin-login');setMobileNavOpen(false);setNotice('')}}>المشرف <LockKeyhole size={14}/></button></nav>}
     {notice&&<div className="notice" role="status"><span>{notice}</span><button onClick={()=>setNotice('')} aria-label="إغلاق"><X size={16}/></button></div>}
 
     {view==='home'&&<main>
@@ -251,10 +269,10 @@ export default function App(){
       <section className="bottom-banner"><div className="banner-emblem"><Trophy size={27}/></div><div><h2>هل فريقك مستعد للتحدي؟</h2><p>كل ثانية تصنع فرقًا. وكل دليل يقربك من الفوز.</p></div><button className="btn btn-outline" onClick={()=>document.getElementById('join-card')?.scrollIntoView({behavior:'smooth',block:'center'})}>انطلق الآن <ArrowLeft size={16}/></button></section>
     </main>}
 
-    {view==='game'&&<main className="game-view"><button className="back-link" onClick={()=>setView('home')}><ArrowLeft size={16}/> العودة للرئيسية</button>
+    {view==='game'&&<main className="game-view">
       <div className="game-header"><div><div className="eyebrow"><Radio size={14}/> ساحة التحدي</div><h1>حيّاكم يا <span>{team?.name||teamName}</span></h1><p>ركزوا مع بعض، كل تفصيلة ممكن تكون المفتاح.</p></div><div className="team-badge"><Users size={17}/><span>فريق مشارك</span></div></div>
       <div className="game-layout"><section className="panel puzzle-panel"><div className="panel-kicker"><span className="puzzle-icon"><CircleHelp size={22}/></span><span>{currentStage?.status==='completed'?'مرحلة مكتملة':'المرحلة المختارة'} <b>{currentStage?.number||'—'}</b></span></div>
-        <h2>{currentStage?.title||(stages.length?'أكملتم المراحل المتاحة!':'الرحلة تستعد للانطلاق')}</h2><p className="puzzle-prompt">{currentStage?.prompt||(stages.length?'ترقّبوا إضافة المراحل التالية من منظّم المسابقة.':'لم تُضف مراحل المسابقة بعد. ارجعوا قريبًا لبدء المغامرة.')}</p>
+        <h2>{currentStage?.title||(stages.length?'أكملتم المراحل المتاحة!':'الرحلة تستعد للانطلاق')}</h2><p className="puzzle-prompt">{currentStage?.prompt||(stages.length?'ترقّبوا إضافة المراحل التالية من منظّم المسابقة.':'لم تُضف مراحل المسابقة بعد. ارجعوا قريبًا لبدء المغامرة.')}</p>{currentStage?.scrambled_sentence&&<div className="scrambled-box"><strong>الجملة المبعثرة</strong><p>{currentStage.scrambled_sentence}</p></div>}
         <button className="hint-toggle" onClick={()=>setHintVisible(v=>!v)}>{hintVisible?<EyeOff size={16}/>:<Lightbulb size={16}/>} {hintVisible?'إخفاء التلميح':'اطلب تلميحًا'} <ChevronLeft size={15}/></button>
         {hintVisible&&<div className="hint-box"><Lightbulb size={17}/><span>{currentStage?.hint||'راقب التفاصيل الصغيرة، فقد تقودك إلى الإجابة.'}</span></div>}
         <form className="answer-form" onSubmit={submitAnswer}><label htmlFor="answer">إجابة فريقك</label><div className="input-wrap answer-input"><input id="answer" value={answer} onChange={e=>setAnswer(e.target.value)} placeholder={currentStage?.status==='completed'?'هذه المرحلة مكتملة':'اكتب الإجابة هنا...'} maxLength={200} disabled={!currentStage||currentStage.status!=='current'||busy} required/><button className="answer-send" disabled={busy||!currentStage||currentStage.status!=='current'}>{busy?<RefreshCw className="spin" size={18}/>:<ArrowLeft size={18}/>}</button></div><p className="answer-help"><LockKeyhole size={13}/> {currentStage?.status==='completed'?'أنجزتم هذه المرحلة بالفعل. اختاروا مرحلة متاحة أخرى.':!currentStage?'أكملتم كل المراحل المتاحة حاليًا.': 'إجاباتكم خاصة بفريقكم ولا تظهر للفرق الأخرى.'}</p></form>
@@ -287,12 +305,15 @@ export default function App(){
       <label>تأكيد كلمة المرور<div className="input-wrap"><KeyRound size={17}/><input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8} placeholder="أعد كتابة كلمة المرور" required/></div></label>
       <button className="btn btn-gold join-submit" disabled={busy}>{busy?'جارٍ الحفظ...':'حفظ كلمة المرور الجديدة'} <Check size={17}/></button></form></div></main>}
 
-    {view==='admin'&&<main className="admin-view"><div className="admin-title-row"><div><div className="eyebrow"><ShieldCheck size={15}/> إدارة المسابقة</div><h1>لوحة <span>المشرف</span></h1><p>إدارة المراحل وإعدادات رحلة الكنز.</p></div><button className="btn btn-ghost" onClick={adminLogout}>تسجيل الخروج</button></div>
+    {view==='admin'&&<main className="admin-view"><div className="admin-title-row"><div><div className="eyebrow"><ShieldCheck size={15}/> إدارة المسابقة</div><h1>لوحة <span>المشرف</span></h1><p>أنت تتحكم بالأسئلة والتلميحات والمراحل والأسر وحالة المسابقة.</p></div><button className="btn btn-ghost" onClick={adminLogout}>تسجيل الخروج</button></div>
+      <section className="panel admin-stage-panel control-panel"><h2>حالة المسابقة</h2><p>افتح المسابقة للأسر أو أغلق الدخول إليها في أي وقت.</p><div className="admin-control-row"><span className={'status-tag '+(gameSettings.is_open?'current':'')}>{gameSettings.is_open?'المسابقة مفتوحة':'المسابقة مغلقة'}</span><button className="btn btn-gold" onClick={async()=>{const next=!gameSettings.is_open;const {error}=await supabase.from('game_settings').update({is_open:next}).eq('id',true);if(error){setNotice('تعذر تغيير حالة المسابقة. تحقق من صلاحيات المشرف.');return;}setGameSettings(v=>({...v,is_open:next}));setGameOpen(next);setNotice(next?'تم فتح المسابقة.':'تم إغلاق المسابقة ومنع دخول أسر جديدة.');}}>{gameSettings.is_open?'إغلاق المسابقة':'فتح المسابقة'}</button></div></section>
       <div className="admin-metrics"><div className="panel metric"><Users/><span>الفرق الظاهرة</span><strong>{teams.length}</strong></div><div className="panel metric"><BookOpen/><span>إجمالي المراحل</span><strong>{stages.length}</strong></div><div className="panel metric"><BadgeCheck/><span>مراحل مكتملة</span><strong>{completed}</strong></div></div>
       <section className="panel admin-stage-panel family-code-panel"><h2>إنشاء رمز دخول لأسرة</h2><p>رمز خاص بالأسرة؛ يمكنهم استخدامه مجددًا باسم الفريق نفسه. يُحفظ الرمز كبصمة مشفّرة ولا يمكن عرضه مجددًا بعد إغلاق نافذة الإنشاء.</p><form onSubmit={createFamilyCode} className="admin-stage-form family-code-form"><label>اسم الأسرة<input value={familyName} onChange={e=>setFamilyName(e.target.value)} placeholder="مثال: أسرة أحمد" minLength={2} maxLength={80} required/></label><button className="btn btn-gold" type="submit"><KeyRound size={17}/> إنشاء رمز الأسرة</button></form>{newFamilyCode&&<div className="generated-code" role="status"><span>رمز الأسرة — انسخه وأرسله الآن</span><strong dir="ltr">{newFamilyCode}</strong><button type="button" className="btn btn-ghost" onClick={()=>navigator.clipboard?.writeText(newFamilyCode).then(()=>setNotice('تم نسخ رمز الأسرة.')).catch(()=>setNotice('انسخ الرمز يدويًا.'))}>نسخ الرمز</button></div>}</section>
-      <section className="panel admin-stage-panel"><h2>إضافة مرحلة جديدة</h2><p>تُحفظ الإجابة كبصمة SHA-256 ولا تظهر في واجهة المشاركين.</p><form onSubmit={createStage} className="admin-stage-form">
-        <label>عنوان المرحلة<input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="مثال: سر البوصلة" required/></label><label>نص اللغز<input value={newPrompt} onChange={e=>setNewPrompt(e.target.value)} placeholder="اكتب نص اللغز" required/></label><label>الإجابة الصحيحة<input value={newAnswer} onChange={e=>setNewAnswer(e.target.value)} placeholder="لن تظهر للمشاركين" required/></label><button className="btn btn-gold" type="submit"><Check size={17}/> حفظ المرحلة</button></form>
-        <div className="admin-list">{stages.map((s,i)=><div className="admin-stage-row" key={s.id}><span>{s.number||String(i+1).padStart(2,'0')}</span><div><strong>{s.title}</strong><small>{s.description||'مرحلة في المسابقة'}</small></div><span className={'status-tag '+s.status}>{s.status==='completed'?'مكتملة':s.status==='current'?'متاحة':'مقفلة'}</span></div>)}</div></section></main>}
+      <section className="panel admin-stage-panel"><h2>إضافة مرحلة جديدة</h2><p>اكتب كل محتوى المرحلة بنفسك. اترك التلميح والجملة المبعثرة فارغين إذا لم تحتج إليهما.</p><form onSubmit={createStage} className="admin-stage-form admin-stage-form-expanded">
+        <label>عنوان المرحلة<input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="مثال: سر البوصلة" required/></label><label>وصف مختصر<input value={newDescription} onChange={e=>setNewDescription(e.target.value)} placeholder="وصف المرحلة"/></label><label>نص السؤال / اللغز<textarea value={newPrompt} onChange={e=>setNewPrompt(e.target.value)} placeholder="اكتب السؤال الذي ستراه الأسرة" required/></label><label>الإجابة الصحيحة<input value={newAnswer} onChange={e=>setNewAnswer(e.target.value)} placeholder="لن تظهر للمشاركين" required/></label><label>التلميح<textarea value={newHint} onChange={e=>setNewHint(e.target.value)} placeholder="اكتب التلميح الذي يظهر عند طلبه"/></label><label>الجملة المبعثرة<textarea value={newScrambled} onChange={e=>setNewScrambled(e.target.value)} placeholder="اكتب كلمات أو جملة مبعثرة تظهر للأسرة"/></label><label>نقاط المرحلة<input type="number" min="0" max="10000" value={newPoints} onChange={e=>setNewPoints(e.target.value)} required/></label><button className="btn btn-gold" type="submit"><Check size={17}/> حفظ المرحلة</button></form>
+        <div className="admin-list">{adminStages.map((s,i)=><div className="admin-stage-row" key={s.id}><span>{s.number||String(i+1).padStart(2,'0')}</span><div><strong>{s.title}</strong><small>{s.description||'مرحلة في المسابقة'}</small></div><span className={'status-tag '+s.status}>{s.status==='completed'?'مكتملة':s.status==='current'?'متاحة':'مقفلة'}</span><button className="btn btn-ghost btn-small" onClick={()=>setEditStage({...s,newAnswer:''})}>تعديل</button><button className="btn btn-ghost btn-small danger" onClick={async()=>{if(!window.confirm('هل تريد حذف هذه المرحلة نهائيًا؟ سيتم حذف إجاباتها المسجلة أيضًا.'))return;const {error}=await supabase.from('stages').delete().eq('id',s.id);if(error){setNotice('تعذر حذف المرحلة.');return;}setNotice('تم حذف المرحلة وإجاباتها المرتبطة.');await refreshAdminData();}}>حذف</button></div>)}</div></section>
+      <section className="panel admin-stage-panel"><h2>إدارة الأسر والفرق</h2><p>استبعاد الأسرة يعطّل رمزها وجلسة فريقها ويزيل الفريق من لوحة الترتيب، مع الاحتفاظ بسجله للمراجعة.</p><div className="admin-list">{familyCodes.map(fc=>{const t=adminTeams.find(x=>x.id===fc.used_by_team);return <div className="admin-stage-row family-row" key={fc.id}><div><strong>{fc.family_name}</strong><small>{t?`الفريق: ${t.name} • ${t.points||0} نقطة`:'لم تدخل الأسرة بعد'}</small></div><span className={'status-tag '+(fc.is_active?'current':'')}>{!fc.is_active?'مستبعدة':t&&!t.is_active?'الفريق معطّل':t?'مشاركة':'رمز فعّال'}</span>{fc.is_active&&<button className="btn btn-ghost btn-small danger" onClick={async()=>{if(!window.confirm(`استبعاد ${fc.family_name} من المسابقة؟`))return;const {error:codeError}=await supabase.from('family_codes').update({is_active:false}).eq('id',fc.id);if(codeError){setNotice('تعذر تعطيل رمز الأسرة.');return;}if(fc.used_by_team){const {error:teamError}=await supabase.from('teams').update({is_active:false}).eq('id',fc.used_by_team);if(teamError){setNotice('تعطّل رمز الأسرة، لكن تعذّر تعطيل الفريق. حدّث الصفحة وحاول مرة أخرى.');await refreshAdminData();return;}}setNotice('تم استبعاد الأسرة وتعطيل جلستها.');await refreshAdminData();}}>استبعاد الأسرة</button>}</div>})}{!familyCodes.length&&<p className="empty-state">لا توجد أسر حتى الآن. أنشئ رمزًا لكل أسرة من القسم أعلاه.</p>}</div></section>
+      {editStage&&<div className="edit-overlay"><section className="panel edit-stage-card"><div className="section-title-row"><h2>تعديل المرحلة</h2><button className="btn btn-ghost btn-small" onClick={()=>setEditStage(null)}>إغلاق</button></div><form className="admin-stage-form admin-stage-form-expanded" onSubmit={async e=>{e.preventDefault();const patch={title:editStage.title.trim(),description:editStage.description||'',prompt:editStage.prompt.trim(),hint:editStage.hint?.trim()||null,scrambled_sentence:editStage.scrambled_sentence?.trim()||null,status:editStage.status,points_reward:Math.max(0,Math.min(10000,Number(editStage.points_reward)||0))};if(editStage.newAnswer?.trim())patch.answer_hash=await hashAnswer(editStage.newAnswer);const {error}=await supabase.from('stages').update(patch).eq('id',editStage.id);if(error){setNotice('تعذر حفظ تعديلات المرحلة. تأكد من تطبيق تحديث قاعدة البيانات.');return;}setNotice('تم حفظ تعديلات المرحلة.');setEditStage(null);await refreshAdminData();}}><label>عنوان المرحلة<input value={editStage.title} onChange={e=>setEditStage(v=>({...v,title:e.target.value}))} required/></label><label>وصف مختصر<input value={editStage.description||''} onChange={e=>setEditStage(v=>({...v,description:e.target.value}))}/></label><label>نص السؤال / اللغز<textarea value={editStage.prompt} onChange={e=>setEditStage(v=>({...v,prompt:e.target.value}))} required/></label><label>الإجابة الجديدة (اختياري)<input value={editStage.newAnswer||''} onChange={e=>setEditStage(v=>({...v,newAnswer:e.target.value}))} placeholder="اتركها فارغة للإبقاء على الإجابة الحالية"/></label><label>التلميح<textarea value={editStage.hint||''} onChange={e=>setEditStage(v=>({...v,hint:e.target.value}))}/></label><label>الجملة المبعثرة<textarea value={editStage.scrambled_sentence||''} onChange={e=>setEditStage(v=>({...v,scrambled_sentence:e.target.value}))}/></label><label>النقاط<input type="number" min="0" max="10000" value={editStage.points_reward} onChange={e=>setEditStage(v=>({...v,points_reward:e.target.value}))}/></label><label>حالة المرحلة<select value={editStage.status} onChange={e=>setEditStage(v=>({...v,status:e.target.value}))}><option value="current">متاحة الآن</option><option value="locked">مقفلة</option></select></label><button className="btn btn-gold" type="submit"><Check size={17}/> حفظ التعديلات</button></form></section></div>}</main>}
 
     <footer className="footer"><Brand/><div className="footer-center">صُمّم للمغامرين وأصحاب العقول الفضولية</div><div className="footer-right"><span><ShieldCheck size={14}/> تجربة آمنة</span><span>© {new Date().getFullYear()} شفرة الكنز</span></div></footer>
   </div>
