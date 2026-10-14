@@ -73,9 +73,9 @@ alter table public.answer_submissions enable row level security;
 alter table public.audit_logs enable row level security;
 
 create or replace function public.is_game_admin()
-returns boolean language sql stable security definer set search_path = '' as $
+returns boolean language sql stable security definer set search_path = '' as $admin$
  select coalesce((auth.jwt()->'app_metadata'->>'role')='game_admin',false);
-$;
+$admin$;
 revoke all on function public.is_game_admin() from public,anon;
 grant execute on function public.is_game_admin() to authenticated;
 drop view if exists public.public_stages;
@@ -93,13 +93,13 @@ revoke all on public.teams from anon;
 grant select (id,name,points,progress,is_active) on public.teams to anon;
 
 create or replace function public.get_game_status()
-returns jsonb language sql stable security definer set search_path = '' as $
+returns jsonb language sql stable security invoker set search_path = '' as $game_status$
  select jsonb_build_object(
   'success',true,
   'is_open',coalesce((select is_open from public.game_settings where id=true),false),
   'game_title',coalesce((select game_title from public.game_settings where id=true),'شفرة الكنز')
  );
-$;
+$game_status$;
 revoke all on function public.get_game_status() from public;
 grant execute on function public.get_game_status() to anon,authenticated;
 
