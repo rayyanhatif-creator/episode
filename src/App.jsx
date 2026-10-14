@@ -26,7 +26,21 @@ export default function App(){
   const [familyName,setFamilyName]=useState(''),[newFamilyCode,setNewFamilyCode]=useState('');
   const [showPassword,setShowPassword]=useState(false);
   const completed=useMemo(()=>stages.filter(s=>s.status==='completed').length,[stages]);
-  const currentStage=activeStage||stages.find(s=>s.status==='current')||stages[0];
+  const currentStage=(activeStage&&stages.find(s=>s.id===activeStage.id))||stages.find(s=>s.status==='current')||null;
+
+  async function refreshTeamState(token,{silent=false}={}){
+    if(!isSupabaseConfigured||!token)return false;
+    const {data,error}=await supabase.rpc('get_team_game_state',{p_session_token:token});
+    if(error||!data?.success){
+      if(!silent)setNotice(data?.message||'تعذر تحميل تقدم الفريق. حاول تسجيل الدخول من جديد.');
+      localStorage.removeItem('shifrat-team-session');
+      setTeam(null);
+      return false;
+    }
+    setTeam({...data.team,token});
+    setStages(Array.isArray(data.stages)?data.stages:[]);
+    return true;
+  }
 
   useEffect(()=>{
     if(!isSupabaseConfigured)return;
@@ -39,11 +53,20 @@ export default function App(){
     });
     let live=true;
     async function load(){
-      const a=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,prompt,hint').order('sort_order');
-      const b=await supabase.from('public_leaderboard').select('id,name,points,progress').order('points',{ascending:false}).limit(10);
+      const [a,b]=await Promise.all([
+        supabase.from('public_stages').select('id,title,number,description,status,sort_order,points_reward').order('sort_order'),
+        supabase.from('public_leaderboard').select('id,name,points,progress').order('points',{ascending:false}).limit(10)
+      ]);
       if(!live)return;
-      if(a.data?.length)setStages(a.data);
-      if(b.data?.length)setTeams(b.data.map((t,i)=>({...t,color:['gold','blue','purple'][i%3]})));
+      if(b.data)setTeams(b.data.map((t,i)=>({...t,color:['gold','blue','purple'][i%3]})));
+      const saved=localStorage.getItem('shifrat-team-session');
+      if(saved){
+        try{
+          const session=JSON.parse(saved);
+          if(session?.token&&await refreshTeamState(session.token,{silent:true}))return;
+        }catch{}
+      }
+      if(a.data)setStages(a.data.map(s=>({...s,status:s.sort_order<=4?'current':'locked',prompt:null,hint:null})));
     }
     load();
     const ch=supabase.channel('game-public-updates')
@@ -55,31 +78,28 @@ export default function App(){
   async function joinGame(e){
     e.preventDefault();setNotice('');
     if(!teamName.trim()||!sessionCode.trim()){setNotice('أدخل اسم الفريق ورمز الدخول.');return}
+    if(!isSupabaseConfigured){setNotice('الموقع غير متصل بقاعدة البيانات حاليًا. حاول لاحقًا.');return}
     setBusy(true);
-    if(isSupabaseConfigured){
-      const {data,error}=await supabase.rpc('join_game',{p_team_name:teamName.trim(),p_session_code:sessionCode.trim()});
-      setBusy(false);
-      if(error||!data?.success){setNotice(error?.message||data?.message||'تعذر الدخول. تحقق من البيانات.');return}
-      setTeam({id:data.team_id,name:data.team_name,token:data.session_token});
-    }else{
-      await new Promise(r=>setTimeout(r,250));setBusy(false);
-      setTeam({id:'demo-team',name:teamName.trim(),token:sessionCode.trim()});
-      setNotice('أنت في وضع المعاينة فقط. اربط Supabase لتفعيل الدخول الحقيقي.');
-    }
-    setView('game');setActiveStage(null);
+    const {data,error}=await supabase.rpc('join_game',{p_team_name:teamName.trim(),p_session_code:sessionCode.trim()});
+    setBusy(false);
+    if(error||!data?.success){setNotice(data?.message||'تعذر الدخول. تحقق من رمز الأسرة وحالة المسابقة.');return}
+    const saved={id:data.team_id,name:data.team_name,token:data.session_token};
+    localStorage.setItem('shifrat-team-session',JSON.stringify(saved));
+    setTeam(saved);
+    await refreshTeamState(data.session_token,{silent:true});
+    setView('game');setActiveStage(null);setFeedback('');
   }
 
   async function submitAnswer(e){
     e.preventDefault();if(!answer.trim()||!currentStage)return;
+    if(!team?.token||!currentStage||currentStage.status==='locked'||currentStage.status==='completed')return;
     setBusy(true);setFeedback('');
-    if(isSupabaseConfigured&&team?.token&&!String(currentStage.id).startsWith('demo-')){
-      const {data,error}=await supabase.rpc('submit_stage_answer',{p_session_token:team.token,p_stage_id:currentStage.id,p_answer:answer.trim()});
-      setBusy(false);
-      if(error){setFeedback('تعذر إرسال الإجابة. حاول مرة أخرى.');return}
-      setFeedback(data?.message||'تم استلام الإجابة.');
-      if(data?.correct)setStages(prev=>prev.map(s=>s.id===currentStage.id?{...s,status:'completed'}:s));
-    }else{setBusy(false);setFeedback('هذه معاينة للواجهة فقط؛ أضف الألغاز في قاعدة البيانات لتفعيل التحقق الحقيقي.')}
-    setAnswer('');
+    const {data,error}=await supabase.rpc('submit_stage_answer',{p_session_token:team.token,p_stage_id:currentStage.id,p_answer:answer.trim()});
+    setBusy(false);
+    if(error){setFeedback('تعذر إرسال الإجابة الآن. تحقق من اتصال الإنترنت ثم حاول مجددًا.');return}
+    setFeedback(data?.message||'تم استلام الإجابة.');
+    if(data?.correct){setActiveStage(null);setAnswer('');}
+    await refreshTeamState(team.token,{silent:true});
   }
 
   async function adminLogin(e){
@@ -122,7 +142,7 @@ export default function App(){
     const {error}=await supabase.from('stages').insert({title:newTitle.trim(),prompt:newPrompt.trim(),answer_hash:await hashAnswer(newAnswer),status:(stages.length===0||allCurrentStagesCompleted)?'current':'locked',sort_order:stages.length+1,description:'مرحلة جديدة'});
     if(error){setNotice('لم يتم حفظ المرحلة. تحقق من صلاحيات المشرف وترتيب المراحل.');return}
     setNewTitle('');setNewPrompt('');setNewAnswer('');setNotice('تمت إضافة المرحلة. إذا انتهت المراحل السابقة، فستكون هذه بداية المجموعة الجديدة.');
-    const {data}=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,prompt,hint').order('sort_order');
+    const {data}=await supabase.from('public_stages').select('id,title,number,description,status,sort_order,points_reward').order('sort_order');
     if(data)setStages(data);
   }
 
@@ -160,11 +180,11 @@ export default function App(){
 
     {view==='game'&&<main className="game-view"><button className="back-link" onClick={()=>setView('home')}><ArrowLeft size={16}/> العودة للرئيسية</button>
       <div className="game-header"><div><div className="eyebrow"><Radio size={14}/> ساحة التحدي</div><h1>حيّاكم يا <span>{team?.name||teamName}</span></h1><p>ركزوا مع بعض، كل تفصيلة ممكن تكون المفتاح.</p></div><div className="team-badge"><Users size={17}/><span>فريق مشارك</span></div></div>
-      <div className="game-layout"><section className="panel puzzle-panel"><div className="panel-kicker"><span className="puzzle-icon"><CircleHelp size={22}/></span><span>المرحلة الحالية <b>{currentStage?.number||'01'}</b></span></div>
-        <h2>{currentStage?.title||'اللغز الأول'}</h2><p className="puzzle-prompt">{currentStage?.prompt||'تأمل الأدلة واجمع ملاحظات فريقك قبل الإجابة.'}</p>
+      <div className="game-layout"><section className="panel puzzle-panel"><div className="panel-kicker"><span className="puzzle-icon"><CircleHelp size={22}/></span><span>{currentStage?.status==='completed'?'مرحلة مكتملة':'المرحلة المختارة'} <b>{currentStage?.number||'—'}</b></span></div>
+        <h2>{currentStage?.title||'أكملتم المراحل المتاحة!'}</h2><p className="puzzle-prompt">{currentStage?.prompt||'ترقّبوا إضافة المراحل التالية من منظّم المسابقة.'}</p>
         <button className="hint-toggle" onClick={()=>setHintVisible(v=>!v)}>{hintVisible?<EyeOff size={16}/>:<Lightbulb size={16}/>} {hintVisible?'إخفاء التلميح':'اطلب تلميحًا'} <ChevronLeft size={15}/></button>
         {hintVisible&&<div className="hint-box"><Lightbulb size={17}/><span>{currentStage?.hint||'راقب التفاصيل الصغيرة، فقد تقودك إلى الإجابة.'}</span></div>}
-        <form className="answer-form" onSubmit={submitAnswer}><label htmlFor="answer">إجابة فريقك</label><div className="input-wrap answer-input"><input id="answer" value={answer} onChange={e=>setAnswer(e.target.value)} placeholder="اكتب الإجابة هنا..." maxLength={200} required/><button className="answer-send" disabled={busy}>{busy?<RefreshCw className="spin" size={18}/>:<ArrowLeft size={18}/>}</button></div><p className="answer-help"><LockKeyhole size={13}/> لن تظهر إجابتك للفرق الأخرى</p></form>
+        <form className="answer-form" onSubmit={submitAnswer}><label htmlFor="answer">إجابة فريقك</label><div className="input-wrap answer-input"><input id="answer" value={answer} onChange={e=>setAnswer(e.target.value)} placeholder={currentStage?.status==='completed'?'هذه المرحلة مكتملة':'اكتب الإجابة هنا...'} maxLength={200} disabled={!currentStage||currentStage.status!=='current'||busy} required/><button className="answer-send" disabled={busy||!currentStage||currentStage.status!=='current'}>{busy?<RefreshCw className="spin" size={18}/>:<ArrowLeft size={18}/>}</button></div><p className="answer-help"><LockKeyhole size={13}/> {currentStage?.status==='completed'?'أنجزتم هذه المرحلة بالفعل. اختاروا مرحلة متاحة أخرى.':!currentStage?'أكملتم كل المراحل المتاحة حاليًا.': 'إجاباتكم خاصة بفريقكم ولا تظهر للفرق الأخرى.'}</p></form>
         {feedback&&<div className="feedback" role="status">{feedback}</div>}</section>
         <aside className="panel progress-panel"><h3><Flag size={18}/> تقدم الفريق</h3><div className="progress-number"><strong>{completed}</strong><span>من {stages.length} مراحل</span></div><div className="progress-track"><span style={{width:(stages.length?completed/stages.length*100:0)+'%'}}/></div>
           <div className="mini-stage-list">{stages.map((s,i)=><button key={s.id} className={'mini-stage '+s.status} onClick={()=>{if(s.status!=='locked')setActiveStage(s)}}><span className="mini-stage-dot">{s.status==='completed'?<Check size={13}/>:i+1}</span><span>{s.title}</span>{s.status==='locked'&&<LockKeyhole size={14}/>}</button>)}</div>
