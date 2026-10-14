@@ -265,10 +265,11 @@ export default function App(){
       setNotice('تعذر حفظ هذا الحقل. تأكد من الاتصال وصلاحية المشرف ثم حاول مرة أخرى.');
       return;
     }
+    let saveMessage='تم حفظ الحقل المحدد مباشرة.';
     if(q.variant_no===1&&(field==='answer'||field==='finalAnswer')){
       const legacyPatch=field==='answer'?{answer_text:nextValue,answer_hash:patch.answer_hash}:{final_answer_text:nextValue,final_answer_hash:patch.final_answer_hash};
       const {error:legacyError}=await supabase.from('stages').update(legacyPatch).eq('id',editStage.id);
-      if(legacyError){setNotice('حُفظ الحقل في نسخة السؤال، لكن تعذّر تحديث النسخة الاحتياطية للمرحلة.');}
+      if(legacyError){saveMessage='حُفظ الحقل في نسخة السؤال، لكن تعذّر تحديث النسخة الاحتياطية للمرحلة.';}
     }
     setEditStage(v=>({...v,questions:v.questions.map((item,j)=>j!==index?item:({...item,
       ...(field==='prompt'?{prompt:nextValue}:{}),
@@ -278,7 +279,7 @@ export default function App(){
       ...(field==='points'?{points_reward:nextValue}:{})
     }))}));
     setSavingField('');
-    if(!notice)setNotice('تم حفظ الحقل المحدد مباشرة.');
+    setNotice(saveMessage);
     await refreshAdminData();
   }
 
