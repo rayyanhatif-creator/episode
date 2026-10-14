@@ -73,16 +73,24 @@ alter table public.answer_submissions enable row level security;
 alter table public.audit_logs enable row level security;
 
 create or replace function public.is_game_admin()
-returns boolean language sql stable security definer set search_path = '' as $$
+returns boolean language sql stable security definer set search_path = '' as $
  select coalesce((auth.jwt()->'app_metadata'->>'role')='game_admin',false);
-$$;
+$;
+revoke all on function public.is_game_admin() from public;
+grant execute on function public.is_game_admin() to authenticated;
 drop view if exists public.public_stages;
-create view public.public_stages as
+create view public.public_stages with (security_invoker = true) as
  select id,title,number,description,status,sort_order,points_reward from public.stages;
-create or replace view public.public_leaderboard as
- select id,name,points,progress from public.teams where is_active=true;
+create or replace view public.public_leaderboard with (security_invoker = true) as
+ select id,name,points,progress,is_active from public.teams where is_active=true;
+revoke all on public.public_stages from anon,authenticated;
+revoke all on public.public_leaderboard from anon,authenticated;
 grant select on public.public_stages to anon,authenticated;
 grant select on public.public_leaderboard to anon,authenticated;
+revoke all on public.stages from anon;
+grant select (id,title,number,description,status,sort_order,points_reward) on public.stages to anon;
+revoke all on public.teams from anon;
+grant select (id,name,points,progress,is_active) on public.teams to anon;
 
 create or replace function public.get_game_status()
 returns jsonb language sql stable security definer set search_path = '' as $
@@ -100,6 +108,10 @@ create policy "admin manages teams" on public.teams for all to authenticated usi
 drop policy if exists "admin manages family codes" on public.family_codes;
 create policy "admin manages family codes" on public.family_codes for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 grant select,insert,update,delete on public.family_codes to authenticated;
+drop policy if exists "public reads stage metadata" on public.stages;
+create policy "public reads stage metadata" on public.stages for select to anon using(true);
+drop policy if exists "public reads active team leaderboard" on public.teams;
+create policy "public reads active team leaderboard" on public.teams for select to anon using(is_active=true);
 create policy "admin manages stages" on public.stages for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
 create policy "admin reads submissions" on public.answer_submissions for select to authenticated using(public.is_game_admin());
 create policy "admin manages submissions" on public.answer_submissions for all to authenticated using(public.is_game_admin()) with check(public.is_game_admin());
