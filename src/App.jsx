@@ -18,7 +18,7 @@ function Brand(){return <div className="brand"><div className="brand-mark"><KeyR
 
 export default function App(){
   const [view,setView]=useState('home'),[teamName,setTeamName]=useState(''),[sessionCode,setSessionCode]=useState('');
-  const [team,setTeam]=useState(null),[stages,setStages]=useState(demoStages),[teams,setTeams]=useState(demoTeams),[gameOpen,setGameOpen]=useState(null);
+  const [team,setTeam]=useState(null),[stages,setStages]=useState([]),[teams,setTeams]=useState([]),[gameOpen,setGameOpen]=useState(null);
   const [activeStage,setActiveStage]=useState(null),[answer,setAnswer]=useState(''),[feedback,setFeedback]=useState('');
   const [hintVisible,setHintVisible]=useState(false),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminSession,setAdminSession]=useState(false);
@@ -175,9 +175,9 @@ export default function App(){
         <div className="secure-note"><ShieldCheck size={15}/> رمز الدخول خاص بفريقك — لا تشاركه مع الفرق الأخرى</div></section>
 
       <section className="stages-section"><div className="section-title-row"><div><div className="eyebrow">خارطة الرحلة</div><h2>مراحل البحث عن الكنز</h2></div><span className="muted-label">{stages.length} مراحل</span></div>
-        <div className="stage-grid">{stages.map((s,i)=><button className={'stage-card '+s.status} key={s.id} onClick={()=>{if(s.status!=='locked'){setActiveStage(s);if(team)setView('game');else setNotice('ادخل بيانات فريقك أولًا لبدء المرحلة.')}}}>
+        <div className="stage-grid">{stages.length?stages.map((s,i)=><button className={'stage-card '+s.status} key={s.id} onClick={()=>{if(s.status!=='locked'){setActiveStage(s);if(team)setView('game');else setNotice('ادخل بيانات فريقك أولًا لبدء المرحلة.')}}}>
           <div className="stage-card-top"><span className="stage-number">{s.number||String(i+1).padStart(2,'0')}</span>{s.status==='completed'?<BadgeCheck size={19}/>:s.status==='locked'?<LockKeyhole size={18}/>:<Radio size={18}/>}</div><h3>{s.title}</h3><p>{s.description||'اكتشف الدليل التالي في رحلتك'}</p><div className="stage-card-footer"><span>{s.status==='completed'?'مكتملة':s.status==='locked'?'مقفلة':'متاحة الآن'}</span><ChevronLeft size={16}/></div>
-        </button>)}</div></section>
+        </button>):<div className="empty-state">تُعرض مراحل البحث هنا بعد تجهيزها من منظّم المسابقة.</div>}</div></section>
       <section className="bottom-banner"><div className="banner-emblem"><Trophy size={27}/></div><div><h2>هل فريقك مستعد للتحدي؟</h2><p>كل ثانية تصنع فرقًا. وكل دليل يقربك من الفوز.</p></div><button className="btn btn-outline" onClick={()=>document.getElementById('join-card')?.scrollIntoView({behavior:'smooth',block:'center'})}>انطلق الآن <ArrowLeft size={16}/></button></section>
     </main>}
 
