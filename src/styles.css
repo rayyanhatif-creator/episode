@@ -58,3 +58,5 @@
 .welcome-card>p:not(.eyebrow){font-size:14px;line-height:2;color:#aebcaf;margin:0 0 25px}
 .welcome-card .btn{min-width:155px}
 @media(max-width:640px){.welcome-card{padding:29px 19px}.welcome-card>p:not(.eyebrow){font-size:12px}.game-exit-row .btn{width:100%}}
+
+.hint-request-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 20px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#d6b66e08}.hint-request-row strong{display:block;color:var(--text);font-size:13px}.hint-request-row p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.6}.hint-request-row .btn{flex-shrink:0}.hint-request-row .btn:disabled{opacity:.55;cursor:not-allowed}@media(max-width:600px){.hint-request-row{align-items:stretch;flex-direction:column}.hint-request-row .btn{width:100%;justify-content:center}}
