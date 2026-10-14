@@ -2,3 +2,24 @@
 .family-code-form{grid-template-columns:minmax(0,1fr) auto;align-items:end}.family-code-form .btn{height:45px;white-space:nowrap}.generated-code{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px;padding:16px;border:1px solid #d6b66e55;background:#d6b66e0c;border-radius:12px}.generated-code span{font-size:12px;color:#b7c4b8}.generated-code strong{font-size:23px;letter-spacing:3px;color:#f0d69a}.generated-code .btn{margin-right:auto}@media(max-width:640px){.family-code-form{grid-template-columns:1fr}.generated-code{align-items:flex-start;flex-direction:column}.generated-code .btn{margin-right:0;width:100%}}
 
 .mobile-nav-panel{display:none}@media(max-width:640px){.mobile-nav-panel{display:grid;gap:4px;padding:10px 0 14px;border-bottom:1px solid var(--line)}.mobile-nav-panel .nav-link{width:100%;justify-content:flex-start;padding:12px 14px;border-radius:9px;background:#ffffff03}}
+
+
+/* Admin controls and exam-style participant view */
+.admin-stage-form-expanded{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+.admin-stage-form textarea,.admin-stage-form select{width:100%;min-height:48px;border:1px solid #ffffff13;border-radius:10px;background:#0c1913;color:#f1f0e9;padding:12px;outline:0;font:inherit;font-size:12px;resize:vertical}
+.admin-stage-form textarea:focus,.admin-stage-form select:focus{border-color:#d6b66e88}
+.admin-stage-form textarea{min-height:92px;line-height:1.8}
+.admin-stage-form-expanded .btn{grid-column:1/-1;justify-self:start}
+.admin-control-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.btn-small{padding:7px 10px;font-size:10px;border-radius:8px;white-space:nowrap}
+.btn-small.danger{color:#f0b3a9;border-color:#7c3c35;background:#7c3c3514}
+.family-row{flex-wrap:wrap}
+.family-row>div{min-width:160px}
+.scrambled-box{margin:14px 0 20px;padding:14px;border:1px dashed #d6b66e66;border-radius:12px;background:#d6b66e0b}
+.scrambled-box strong{display:block;color:var(--gold2);font-size:12px;margin-bottom:8px}
+.scrambled-box p{margin:0;color:#f0e3bc;line-height:2;font-size:14px;letter-spacing:.5px}
+.edit-overlay{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:18px;background:#050b08d9;overflow:auto}
+.edit-stage-card{width:min(850px,100%);max-height:94vh;overflow:auto}
+.edit-stage-card .section-title-row{align-items:center;margin-bottom:20px}
+.edit-stage-card .section-title-row h2{margin:0}
+@media(max-width:640px){.admin-stage-form-expanded{grid-template-columns:1fr}.admin-stage-form-expanded .btn{grid-column:auto;width:100%}.admin-control-row{align-items:stretch;flex-direction:column}.admin-control-row .btn{width:100%}.admin-stage-row{flex-wrap:wrap}.edit-overlay{padding:8px}.edit-stage-card{max-height:98vh;padding:15px}}
