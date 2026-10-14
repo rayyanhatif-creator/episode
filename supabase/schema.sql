@@ -82,7 +82,7 @@ drop view if exists public.public_stages;
 create view public.public_stages with (security_invoker = true) as
  select id,title,number,description,status,sort_order,points_reward from public.stages;
 create or replace view public.public_leaderboard with (security_invoker = true) as
- select id,name,points,progress,is_active from public.teams where is_active=true;
+ select id,name,points,progress from public.teams where is_active=true;
 revoke all on public.public_stages from anon,authenticated;
 revoke all on public.public_leaderboard from anon,authenticated;
 grant select on public.public_stages to anon,authenticated;
